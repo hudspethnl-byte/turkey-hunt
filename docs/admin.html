@@ -333,7 +333,8 @@ a { color:var(--accent); }
     if (!spot) todo.push("Set the hiding spot. This can wait until the day.");
     else if (spot.lat === 40.73082 && spot.lon === -73.99733) todo.push("The hiding spot is still the placeholder (Washington Square Arch).");
     if (s.end && Date.parse(s.end) > Date.now()) todo.push(`An end time is saved (${clock(s.end)}). Clear it under Mid-hunt unless the hunt should stop then.`);
-    if (s.testMode) todo.push("Rehearsal mode is on. Turn it off under Compass before the real hunt.");
+    if (s.testMode && spot) todo.push("Rehearsal mode is on, so the saved spot is NOT being kept secret right now. Turn rehearsal mode off under Compass before you save the real spot.");
+    else if (s.testMode) todo.push("Rehearsal mode is on. Turn it off under Compass before the real hunt.");
     if (!todo.length) todo.push("All set.");
     $("todo").textContent = "";
     todo.forEach(text => { const li = document.createElement("li"); li.textContent = text; $("todo").appendChild(li); });
