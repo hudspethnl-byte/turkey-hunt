@@ -410,9 +410,15 @@ a { color:var(--accent); }
     try {
       const res = await fetch(`api/state?t=${Date.now()}`, { cache: "no-store" });
       const state = res.ok ? await res.json().catch(() => null) : null;
-      mode = state && typeof state.now === "number" ? "api" : "github";
-    } catch (e) {
-      $("status").textContent = "No connection. Check your signal, then reload this page.";
+      if (state && typeof state.now === "number") mode = "api";
+      else {
+        // No service answered. Only the fallback site has a settings file.
+        const file = await fetch(`config.json?t=${Date.now()}`, { cache: "no-store" });
+        if (file.ok) mode = "github";
+      }
+    } catch (e) { /* handled below */ }
+    if (!mode) {
+      $("status").textContent = "Couldn't reach the hunt. Check your signal, then reload this page.";
       return;
     }
     if (mode === "github") {

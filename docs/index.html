@@ -231,13 +231,16 @@ body[data-asleep="1"] .hub .dot { display:none; }
           delete state.now;
           return state;
         }
-        if (source === null && (res.ok || res.status === 404)) source = "file";   // this site has no service
-      } catch (e) { /* no connection */ }
-      if (source !== "file") return null;
+      } catch (e) { /* no connection, or no service here */ }
+      if (source === "api") return null;   // the service exists; keep what we have and ask again shortly
     }
+    // No answer from a service. If this site has a settings file, it is the
+    // fallback site. (The main site deliberately does not serve one.)
     const res = await fetch(`config.json?t=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
+    const settings = await res.json();
+    source = "file";
+    return settings;
   }
   let nudgedAt = 0;
   const nudge = () => { if (Date.now() - nudgedAt > 2000) { nudgedAt = Date.now(); loadConfig(); } };
