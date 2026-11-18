@@ -40,6 +40,9 @@
                  page with ?rehearse added) show tools for trying a compass
                  window, and the compass answers at any time. Players see
                  nothing extra. Off for the real hunt.
+    hints        (main site only) what the organizer has posted from the
+                 organizer page: text, a photo, or both, oldest first. Photos
+                 are fetched from api/photo/ID.
 -->
 
 <style>
@@ -68,6 +71,13 @@ p { margin:0; }
 .ig { display:grid; gap:10px; }
 .ig iframe { width:100%; height:390px; border:0; border-radius:12px; background:#fff; }
 .when { color:var(--muted); font-weight:600; }
+.hints h2 { margin-bottom:12px; }
+.hint { display:grid; gap:8px; padding-top:14px; margin-top:14px; border-top:1px solid var(--line); }
+.hint:first-child { padding-top:0; margin-top:0; border-top:0; }
+.hint .meta { display:flex; gap:8px; align-items:center; font-size:13px; font-weight:700; color:var(--muted); }
+.hint .new { background:var(--accent); color:var(--accent-ink); border-radius:999px; padding:1px 8px; font-size:12px; }
+.hint .text { font-size:17px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.hint img { display:block; width:100%; height:auto; border-radius:12px; background:var(--line); }
 
 .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px 16px; margin-top:14px; }
 .compass { text-align:center; }
@@ -168,9 +178,15 @@ body[data-asleep="1"] .hub .dot { display:none; }
 
   <!-- The group's Instagram, where the hints are posted. It sits in its own
        frame, so Instagram's code cannot see this page or the phone's location. -->
+  <!-- Hints the organizer has posted from the organizer page, newest first. -->
+  <section id="hints" class="card hints" aria-label="Hints" hidden>
+    <h2>Hints</h2>
+    <div id="hintList"></div>
+  </section>
+
   <section id="ig" class="card ig" aria-label="Instagram" hidden>
-    <h2>Hints and updates</h2>
-    <p>Hints are posted on Instagram.</p>
+    <h2 id="igTitle">Hints and updates</h2>
+    <p id="igNote">Hints are posted on Instagram.</p>
     <iframe id="igFrame" title="The hunt's Instagram profile" loading="lazy" referrerpolicy="no-referrer"
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
     <a id="igLink" class="btn" target="_blank" rel="noopener"></a>
@@ -252,6 +268,63 @@ body[data-asleep="1"] .hub .dot { display:none; }
       $("igLink").href = `https://www.instagram.com/${encodeURIComponent(ig)}/`;
       $("igLink").textContent = `Open @${ig} on Instagram`;
     }
+
+    const hints = Array.isArray(raw.hints) ? raw.hints : [];
+    showHints(hints);
+    $("igTitle").textContent = hints.length ? "Instagram" : "Hints and updates";
+    $("igNote").textContent = hints.length ? "Stories and updates from the hunt." : "Hints are posted on Instagram.";
+  }
+
+  /* ---------- hints ---------- */
+  // The organizer posts hints (text, a photo, or both) from the organizer page.
+  // They arrive with the settings, so an open page shows a new one within
+  // seconds. A hint this phone hasn't shown before is marked "New".
+  let hintsKey = null;
+  const shownHints = new Set(), newHints = new Set();
+  let seenHints = null;   // what this phone had already shown when the page opened; null on a first visit
+  try {
+    const stored = JSON.parse(localStorage.getItem("turkey-hints-seen"));
+    if (Array.isArray(stored)) seenHints = new Set(stored);
+  } catch (e) {}
+  function showHints(list) {
+    const key = JSON.stringify(list);
+    if (key === hintsKey) return;
+    const first = hintsKey === null;
+    hintsKey = key;
+
+    let arrived = false;
+    for (const h of list) {
+      if (first ? (seenHints && !seenHints.has(h.id)) : !shownHints.has(h.id)) { newHints.add(h.id); arrived = arrived || !first; }
+    }
+    shownHints.clear();
+    list.forEach(h => shownHints.add(h.id));
+    try { localStorage.setItem("turkey-hints-seen", JSON.stringify([...shownHints])); } catch (e) {}
+    if (arrived) buzz();
+
+    const box = $("hintList");
+    box.textContent = "";
+    const add = (parent, tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; parent.appendChild(e); return e; };
+    const today = new Date().toDateString();
+    list.map((h, i) => ({ h, n: i + 1 })).reverse().forEach(({ h, n }) => {
+      const row = add(box, "article", "hint");
+      const posted = new Date(h.at);
+      const day = posted.toDateString() === today ? "" : posted.toLocaleDateString([], { weekday: "short" }) + " ";
+      const meta = add(row, "p", "meta", `Hint ${n} · ${day}${fmtClock(h.at)}`);
+      if (newHints.has(h.id)) add(meta, "span", "new", "New");
+      if (h.text) add(row, "p", "text", h.text);
+      if (h.photo) {
+        const link = add(row, "a");
+        link.href = "api/photo/" + h.id;
+        link.target = "_blank";
+        link.rel = "noopener";
+        const img = add(link, "img");
+        img.alt = h.text ? "The photo that goes with this hint" : "A photo hint";
+        img.loading = "lazy";
+        if (h.photo.w && h.photo.h) { img.width = h.photo.w; img.height = h.photo.h; }
+        img.src = "api/photo/" + h.id;
+      }
+    });
+    $("hints").hidden = !list.length;
   }
 
   // Where the settings come from. On the main site a small service answers at
@@ -797,7 +870,11 @@ body[data-asleep="1"] .hub .dot { display:none; }
     });
     render();
     setInterval(render, 500);
-    const again = async () => { await loadConfig(); setTimeout(again, source === "api" ? 15000 : POLL); };
+    // A page nobody is looking at doesn't ask; it catches up the moment it is opened again (above).
+    const again = async () => {
+      if (document.visibilityState === "visible") await loadConfig();
+      setTimeout(again, source === "api" ? 15000 : POLL);
+    };
     setTimeout(again, source === "api" ? 15000 : POLL);
   }
   boot();

@@ -16,7 +16,9 @@
   - On the main site, it talks to the hunt's small service (src/worker.js)
     using a passcode. Changes reach phones within about 15 seconds. The
     hiding spot stays on the server: players' phones are only ever told a
-    direction.
+    direction. Hints (text, a photo, or both) are posted from here too;
+    photos are redrawn smaller first, which leaves out the location a
+    camera saves inside them.
 
   - On the fallback site (GitHub), there is no service. It saves a new copy
     of the settings file (config.json) to the GitHub repo, using a GitHub
@@ -70,6 +72,19 @@ input[type="text"], input[type="password"], input[type="number"], input[type="da
   width:100%; font:inherit; font-size:16px; padding:11px 12px; border:1px solid var(--muted); border-radius:10px;
   background:transparent; color:inherit;
 }
+textarea {
+  width:100%; font:inherit; font-size:16px; padding:11px 12px; border:1px solid var(--muted); border-radius:10px;
+  background:transparent; color:inherit; resize:vertical;
+}
+/* The real file picker is kept off screen; the "Add a photo" label opens it. */
+.filePick { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.preview { display:grid; gap:6px; justify-items:start; }
+.preview img, .posted img { display:block; max-width:100%; max-height:220px; border-radius:12px; background:var(--line); }
+.posted { display:grid; gap:12px; }
+.posted:empty { display:none; }
+.posted .hint { display:grid; gap:6px; padding-top:12px; border-top:1px solid var(--line); }
+.posted .meta { font-size:13px; font-weight:700; color:var(--muted); }
+.posted .text { white-space:pre-wrap; overflow-wrap:anywhere; }
 .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 input[type="checkbox"] { width:22px; height:22px; flex:none; }
 .msg { font-weight:600; }
@@ -119,6 +134,25 @@ a { color:var(--accent); }
       </div>
       <p id="endNow" class="small"></p>
       <button id="endHunt" class="btn" type="button" hidden>End the hunt now</button>
+    </section>
+
+    <!-- Hints: posted straight away, not with the Save button. Main site only. -->
+    <section id="hintsCard" class="card" hidden>
+      <h2>Hints</h2>
+      <p class="small">A hint shows on the players' page within about 15 seconds of posting. Everyone on the site can see it.</p>
+      <label>Hint text
+        <textarea id="hintText" rows="3" maxlength="500" placeholder="Type a hint, add a photo, or both"></textarea>
+      </label>
+      <label class="btn" for="hintFile" id="hintPick">Add a photo</label>
+      <input id="hintFile" class="filePick" type="file" accept="image/*">
+      <div id="hintPreview" class="preview" hidden>
+        <img id="hintThumb" alt="The photo that will be posted">
+        <button id="hintDrop" class="linkish" type="button">Take the photo off</button>
+      </div>
+      <button id="hintPost" class="btn primary" type="button">Post hint</button>
+      <p id="hintMsg" class="msg"></p>
+      <p class="small">Photos are shrunk before they are sent. That also removes the location a phone camera saves inside every photo.</p>
+      <div id="hintPosted" class="posted"></div>
     </section>
 
     <section class="card">
@@ -443,6 +477,130 @@ a { color:var(--accent); }
     showSpot(`Spot read as ${lat.toFixed(5)}, ${lon.toFixed(5)}. Check the map, then save.`);
   }
 
+  /* ---------- hints (main site only) ---------- */
+  let hintPhoto = null;   // the shrunk photo waiting to be posted
+
+  // Redraw the photo smaller. Besides saving data, the redrawn copy carries
+  // none of what the camera wrote into the original, including where it was taken.
+  async function shrink(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      await new Promise((ok, bad) => { img.onload = ok; img.onerror = () => bad(new Error("unreadable")); img.src = url; });
+      const W = img.naturalWidth, H = img.naturalHeight;
+      if (!W || !H) throw new Error("unreadable");
+      let side = 1600, quality = 0.82, out = null;
+      for (let tries = 0; tries < 4; tries++) {
+        const k = Math.min(1, side / Math.max(W, H));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(W * k));
+        c.height = Math.max(1, Math.round(H * k));
+        const g = c.getContext("2d");
+        g.fillStyle = "#fff";                       // a see-through picture gets a white background
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        out = await new Promise(done => c.toBlob(done, "image/jpeg", quality));
+        if (!out) throw new Error("unreadable");
+        if (out.size <= 600000) break;              // small enough; otherwise go again, smaller
+        side = Math.round(side * 0.8);
+        quality -= 0.07;
+      }
+      return out;
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  function setHintPhoto(blob) {
+    if ($("hintThumb").src) URL.revokeObjectURL($("hintThumb").src);
+    hintPhoto = blob;
+    $("hintPreview").hidden = !blob;
+    $("hintPick").textContent = blob ? "Choose a different photo" : "Add a photo";
+    if (blob) $("hintThumb").src = URL.createObjectURL(blob);
+    else $("hintThumb").removeAttribute("src");
+  }
+
+  async function pickedPhoto() {
+    const file = $("hintFile").files[0];
+    $("hintFile").value = "";
+    if (!file) return;
+    say("hintMsg", "Getting the photo ready…");
+    try {
+      setHintPhoto(await shrink(file));
+      say("hintMsg", "");
+    } catch (e) {
+      setHintPhoto(null);
+      say("hintMsg", "Couldn't read that photo. Try a screenshot of it instead.", "bad");
+    }
+  }
+
+  async function hintCall(method, path, headers, body) {
+    const res = await fetch(path, {
+      method, cache: "no-store", body,
+      headers: Object.assign({ "Authorization": `Bearer ${key}` }, headers),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { const e = new Error((data && data.error) || ""); e.status = res.status; throw e; }
+    return data;
+  }
+  const hintError = e => e.status === 401 ? "Wrong passcode." : (e.status && e.message) || explain(e);
+
+  async function postHint() {
+    const text = $("hintText").value.trim();
+    if (!text && !hintPhoto) { say("hintMsg", "Type a hint or add a photo first.", "bad"); return; }
+    $("hintPost").disabled = true;
+    say("hintMsg", "Posting…");
+    try {
+      const headers = { "X-Hint-Text": encodeURIComponent(text) };
+      if (hintPhoto) headers["Content-Type"] = "image/jpeg";
+      const data = await hintCall("POST", "api/admin/hints", headers, hintPhoto || undefined);
+      $("hintText").value = "";
+      setHintPhoto(null);
+      showHints(data.hints);
+      say("hintMsg", `Posted at ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Phones show it within about 15 seconds.`, "ok");
+    } catch (e) { say("hintMsg", hintError(e), "bad"); }
+    $("hintPost").disabled = false;
+  }
+
+  async function removeHint(hint, label) {
+    if (!confirm(`Take ${label} down for everyone?`)) return;
+    try {
+      const data = await hintCall("DELETE", "api/admin/hints/" + encodeURIComponent(hint.id));
+      showHints(data.hints);
+      say("hintMsg", `${label} taken down.`, "ok");
+    } catch (e) {
+      say("hintMsg", hintError(e), "bad");
+      loadHints();
+    }
+  }
+
+  // The hints already posted, newest first, each with a way to take it down.
+  function showHints(hints) {
+    const box = $("hintPosted");
+    box.textContent = "";
+    const add = (parent, tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; parent.appendChild(e); return e; };
+    (hints || []).map((hint, i) => ({ hint, label: `Hint ${i + 1}` })).reverse().forEach(({ hint, label }) => {
+      const row = add(box, "div", "hint");
+      add(row, "p", "meta", `${label} · posted ${clock(new Date(hint.at).toISOString())}`);
+      if (hint.text) add(row, "p", "text", hint.text);
+      if (hint.photo) {
+        const img = add(row, "img");
+        img.alt = "The photo with this hint";
+        img.loading = "lazy";
+        img.src = "api/photo/" + hint.id;
+      }
+      const off = add(row, "button", "linkish", "Take this hint down");
+      off.type = "button";
+      off.addEventListener("click", () => removeHint(hint, label));
+    });
+  }
+
+  async function loadHints() {
+    try {
+      const res = await fetch(`api/state?t=${Date.now()}`, { cache: "no-store" });
+      const state = res.ok ? await res.json() : null;
+      if (state) showHints(state.hints);
+    } catch (e) { /* the list fills in on the next post */ }
+  }
+
   /* ---------- start ---------- */
   async function open() {
     $("keyCard").hidden = true;
@@ -451,6 +609,8 @@ a { color:var(--accent); }
       await load();
       try { localStorage.setItem(keyStore(), key); } catch (e) {}
       $("panel").hidden = false;
+      $("hintsCard").hidden = mode !== "api";
+      if (mode === "api") loadHints();
     } catch (e) {
       $("keyCard").hidden = false;
       $("status").textContent = startLine();
@@ -467,6 +627,9 @@ a { color:var(--accent); }
     $("status").textContent = startLine();
     say("keyMsg", "Forgotten on this phone.");
   });
+  $("hintFile").addEventListener("change", pickedPhoto);
+  $("hintDrop").addEventListener("click", () => setHintPhoto(null));
+  $("hintPost").addEventListener("click", postHint);
   $("here").addEventListener("click", locate);
   $("coords").addEventListener("input", pasted);
   $("noSpot").addEventListener("click", () => { spot = null; showSpot("No spot yet. Save to send that to phones."); });
