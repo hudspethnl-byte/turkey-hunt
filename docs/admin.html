@@ -104,6 +104,12 @@ a { color:var(--accent); }
       <ul id="todo" class="todo"></ul>
     </section>
 
+    <section id="rehearseCard" class="card" hidden>
+      <h2>Rehearsal</h2>
+      <p class="small">Rehearsal mode is on. Try a compass window on this phone: the players' page opens with rehearsal tools at the top. Players never see them.</p>
+      <a class="btn primary" href="./?rehearse=1">Rehearse on this phone</a>
+    </section>
+
     <section class="card">
       <h2>Mid-hunt</h2>
       <p id="modeNow" class="small"></p>
@@ -147,7 +153,7 @@ a { color:var(--accent); }
       </label>
       <label class="row"><input id="alwaysOn" type="checkbox"> Compass always on until the end</label>
       <label class="row"><input id="testMode" type="checkbox"> Rehearsal mode (turn off before the real hunt)</label>
-      <p class="small"><a href="./?rehearse=1">Rehearse on this phone</a>: opens the players' page with tools to jump to a compass window. It only works while rehearsal mode is on and saved. Players never see those tools.</p>
+      <p class="small">While rehearsal mode is on and saved, a Rehearsal card near the top of this page opens the players' page with tools to jump to a compass window. Players never see those tools.</p>
     </section>
 
     <section class="card">
@@ -323,6 +329,7 @@ a { color:var(--accent); }
     $("direction").value = s.direction === "exact" ? "exact" : "general";
     $("alwaysOn").checked = !!s.alwaysOn;
     $("testMode").checked = !!s.testMode;
+    $("rehearseCard").hidden = !s.testMode;
     $("status").textContent =
       (s.start ? `Starts ${clock(s.start)}` : "No start time") +
       ` · ${s.alwaysOn ? "compass always on" : `${s.liveSeconds} s every ${s.everyMinutes} min`}` +

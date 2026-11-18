@@ -35,10 +35,11 @@
     direction    "general" snaps the turkey to the nearest of 8 directions;
                  "exact" points straight at the spot.
     alwaysOn     true keeps the compass on from now until the end (the endgame).
-    testMode     rehearsal mode. While true, the organizer's rehearsal link
-                 (this page with ?rehearse added) shows tools for trying a
-                 compass window, and the spot is not held back. Players on
-                 the plain address see nothing extra. Off for the real hunt.
+    testMode     rehearsal mode. While true, the organizer's phone (one that
+                 has unlocked the organizer page) and the rehearsal link (this
+                 page with ?rehearse added) show tools for trying a compass
+                 window, and the compass answers at any time. Players see
+                 nothing extra. Off for the real hunt.
 -->
 
 <style>
@@ -189,7 +190,12 @@ body[data-asleep="1"] .hub .dot { display:none; }
   const $ = id => document.getElementById(id);
   const qs = new URLSearchParams(location.search);
   const ua = navigator.userAgent || "";
-  const REHEARSE = qs.has("rehearse");   // the organizer's rehearsal link; does nothing unless rehearsal mode is on
+  // Rehearsal tools show on the organizer's own phone (one that has unlocked the
+  // organizer page, so the passcode or key is saved on it) and on the rehearsal
+  // link (?rehearse). Either way they do nothing unless rehearsal mode is on.
+  let organizerPhone = false;
+  try { organizerPhone = !!(localStorage.getItem("turkey-admin-pass") || localStorage.getItem("turkey-admin-key")); } catch (e) {}
+  const REHEARSE = qs.has("rehearse") || organizerPhone;
   const DEFAULTS = {
     name: "The Turkey Hunt", target: null, start: null, end: null,
     instagram: "nycturkeyhunters",
@@ -687,7 +693,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
   // mode is on. Players on the plain address never see them.
   function buildSetup() {
     const box = $("setup");
-    if (REHEARSE && !TEST) {
+    if (qs.has("rehearse") && !TEST) {
       box.textContent = "Rehearsal mode is off, so the rehearsal tools are hidden. Turn it on from the organizer page to use them.";
       box.hidden = false;
       return;
@@ -751,7 +757,9 @@ body[data-asleep="1"] .hub .dot { display:none; }
     tryBox.append(timing, jump, near, note, loaded, debug,
       add("p", "These controls only change this phone, and a change to the real settings overrides them."));
     box.append(add("strong", "Rehearsal tools"),
-      add("p", "Only you see this, because you opened the rehearsal link. Players never do."), tryBox);
+      add("p", organizerPhone
+        ? "You see this because this phone is unlocked as the organizer's and rehearsal mode is on. Players never do."
+        : "Only you see this, because you opened the rehearsal link. Players never do."), tryBox);
     box.hidden = false;
   }
 
