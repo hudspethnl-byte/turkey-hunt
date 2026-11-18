@@ -273,6 +273,8 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   const inAppHit = /Instagram|FBAN|FBAV|FB_IAB|Barcelona|Snapchat|TikTok|musical_ly|Bytedance|LinkedInApp/i.exec(ua);
   let inApp = !inAppHit ? null : /Instagram/i.test(inAppHit[0]) ? "Instagram" : /^FB/i.test(inAppHit[0]) ? "Facebook" : "this app";
   if (TEST && qs.get("inapp")) inApp = qs.get("inapp");   // test mode: ?inapp=Instagram shows the prompt
+  // Laptops and desktops have no compass sensor at all.
+  const looksDesktop = !(navigator.maxTouchPoints > 0) && !/Android|iPhone|iPad|iPod/i.test(ua);
 
   /* ---------- schedule ---------- */
   function phase(t) {
@@ -330,8 +332,12 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   let heading = null;        // degrees clockwise from true north, smoothed
   let geoWatch = null, geoStartedAt = 0, geoError = null, compassDenied = false;
   let wake = null, wakePending = false;
+  let permResult = "not asked", evCount = 0, evWebkit = 0, evAbs = 0;   // for the organizer's debug line
 
   function onOrient(e) {
+    evCount++;
+    if (typeof e.webkitCompassHeading === "number") evWebkit++;
+    if (e.absolute) evAbs++;
     let h = null;
     if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) h = e.webkitCompassHeading; // iPhone
     else if (e.absolute && typeof e.alpha === "number") h = 360 - e.alpha;                                       // Android
@@ -376,10 +382,12 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
       heading = fakeHeading;
     } else {
       try { // iPhone only hands over the compass when asked from a tap
-        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-          if (await DeviceOrientationEvent.requestPermission() !== "granted") compassDenied = true;
-        }
-      } catch (e) { compassDenied = true; }
+        if (typeof DeviceOrientationEvent === "undefined") permResult = "no motion support in this browser";
+        else if (typeof DeviceOrientationEvent.requestPermission === "function") {
+          permResult = await DeviceOrientationEvent.requestPermission();
+          if (permResult !== "granted") compassDenied = true;
+        } else permResult = "not needed";
+      } catch (e) { compassDenied = true; permResult = "refused (" + (e && e.name || "error") + ")"; }
       // Listen either way: a real reading always wins over a "denied" answer.
       window.addEventListener("deviceorientationabsolute", onOrient, true);
       window.addEventListener("deviceorientation", onOrient, true);
@@ -529,6 +537,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     if (sensorsOn && state !== "over") {
       const waited = Date.now() - sensorsSince > 3000;
       const c = heading !== null ? (state === "dark" ? "Compass ready for the next window." : "Compass working.")
+        : looksDesktop && waited ? "This looks like a computer, which has no compass, so north is the top of the dial. Open the link on a phone for the real thing."
         : compassDenied ? "Compass blocked. Close this tab and reopen the link to be asked again. Until then, north is the top of the dial."
         : waited ? "No compass signal on this device, so north is the top of the dial. If you're inside another app, open the link in Safari or Chrome."
         : "Waiting for the compass…";
@@ -542,6 +551,13 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
       diag = c + g;
     }
     $("diag").textContent = diag;
+
+    // Organizer-only: what the phone actually reported, for chasing a compass that won't start.
+    if (TEST && $("debug")) {
+      $("debug").textContent = !sensorsOn ? "" :
+        `Compass debug: permission ${permResult}; ${evCount} motion events, ${evWebkit} with an iPhone heading, ${evAbs} marked absolute; ` +
+        `${looksDesktop ? "looks like a computer" : "looks like a phone"}${inApp ? `, inside ${inApp}` : ""}.`;
+    }
 
     // The "open in Safari or Chrome" prompt goes away once the compass and GPS both work here.
     if (inApp) $("inapp").hidden = heading !== null && !!pos;
@@ -726,9 +742,11 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
         { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 });
     });
 
+    const debug = add("p");
+    debug.id = "debug";
     const tryBox = add("div");
     tryBox.className = "try";
-    tryBox.append(timing, sel, warmLabel, jump, near, note,
+    tryBox.append(timing, sel, warmLabel, jump, near, note, debug,
       add("p", "These controls reset when the page reloads. To keep a setting, change it in the settings block."));
     box.append(add("strong", "Organizer checklist"), ul, add("strong", "Try it out"), tryBox);
     box.hidden = false;
