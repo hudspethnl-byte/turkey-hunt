@@ -6,6 +6,13 @@
   "name": "turkey-hunt",
   "main": "src/worker.js",
   "compatibility_date": "2026-11-01",
+  // The site's own addresses. workers_dev keeps the original
+  // turkey-hunt.nycturkeyhunt.workers.dev address working as a back door.
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "nycturkeyhunt.com", "custom_domain": true },
+    { "pattern": "www.nycturkeyhunt.com", "custom_domain": true }
+  ],
   "assets": {
     "directory": "./docs",
     "binding": "ASSETS",
