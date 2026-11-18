@@ -13,11 +13,13 @@
   WHERE THE HUNT'S SETTINGS LIVE.
 
   On the main site a small service (src/worker.js) holds them and this page
-  asks it every 15 seconds. The hiding spot is only handed over while the
-  compass is live.
+  asks it every 15 seconds. The hiding spot never reaches this page: while
+  the compass is live, the page sends the phone's position to the service
+  and gets back only a direction.
 
   On the fallback site there is no service, so this page re-reads the
-  settings file, config.json, every 30 seconds instead.
+  settings file, config.json, every 30 seconds instead, and works out the
+  direction on the phone.
 
   Either way a change reaches every phone without anyone reloading. The
   settings:
@@ -272,8 +274,35 @@ body[data-asleep="1"] .hub .dot { display:none; }
     source = "file";
     return settings;
   }
-  let nudgedAt = 0;
-  const nudge = () => { if (Date.now() - nudgedAt > 2000) { nudgedAt = Date.now(); loadConfig(); } };
+  // On the main site the phone never learns the spot. While the compass is
+  // live it tells the service where it is and gets back only a direction.
+  let remoteBearing = null, askedAt = 0, asking = false;
+  async function askDirection() {
+    if (asking || !pos) return;
+    asking = true;
+    askedAt = Date.now();
+    try {
+      const res = await fetch("api/direction", {
+        method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: +pos.lat.toFixed(5), lon: +pos.lon.toFixed(5) }),
+      });
+      const d = res.ok ? await res.json() : null;
+      if (d && d.open && typeof d.bearing === "number") remoteBearing = d.bearing;
+      else if (d && !d.open) { remoteBearing = null; askedAt = Date.now() - 3300; }   // not open yet: ask again in under a second
+    } catch (e) { /* no connection: keep the last direction and try again */ }
+    asking = false;
+    render();
+  }
+  // The direction to show: worked out here when this phone holds a spot (the
+  // fallback site, or a test turkey), otherwise whatever the service last said.
+  function currentBearing() {
+    if (target && pos) {
+      const b = bearingTo(pos, target);
+      return mode === "general" ? (Math.round(b / 45) * 45) % 360 : b;
+    }
+    return remoteBearing;
+  }
 
   // Read the settings. A change is applied on the spot; the page never needs a reload.
   async function loadConfig() {
@@ -434,9 +463,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const h = heading === null ? 0 : heading;   // no compass: north is the top of the dial
     shownHeading = ease(shownHeading, h, dt, 90);
     $("rose").setAttribute("transform", `rotate(${(-shownHeading).toFixed(2)} 150 150)`);
-    if (document.body.dataset.needle === "1" && pos && target) {
-      let b = bearingTo(pos, target);
-      if (mode === "general") b = (Math.round(b / 45) * 45) % 360;   // snap to 8 points
+    const b = document.body.dataset.needle === "1" ? currentBearing() : null;
+    if (b !== null) {
       shownBearing = shownBearing === null ? b : ease(shownBearing, b, dt, 150);
       const a = (shownBearing - shownHeading + 360) % 360;
       $("needle").setAttribute("transform", `rotate(${a.toFixed(2)} 150 150)`);
@@ -524,18 +552,21 @@ body[data-asleep="1"] .hub .dot { display:none; }
       hub = cfg.pointer;
     }
 
-    // The service hands over the spot just before each window; ask as soon as it is due.
-    if (source === "api" && hasSpot && !target && (soon || state === "live")) nudge();
+    // On the main site, ask the service for the direction while the compass is live.
+    const asksService = source === "api" && !target;
+    if (state !== "live") remoteBearing = null;
+    else if (asksService && sensorsOn && fresh && Date.now() - askedAt > 4000) askDirection();
 
     let showNeedle = false;
     if (state === "live" && sensorsOn) {
+      const b = fresh ? currentBearing() : null;
       if (geoError === "denied") dir = "Location is blocked for this page. Allow it in your browser settings, then reload.";
       else if (geoError === "unsupported") dir = "This browser can't share location. Open the link in Safari or Chrome.";
-      else if (!target) dir = "Finding the turkey…";
       else if (!fresh) dir = "Finding you…";
+      else if (b === null) dir = "Finding the turkey…";
       else {
         showNeedle = true;
-        dir = `The turkey is ${WORDS[Math.round(bearingTo(pos, target) / 45) % 8]} of you.`;
+        dir = `The turkey is ${WORDS[Math.round(b / 45) % 8]} of you.`;
       }
     }
     document.body.dataset.needle = showNeedle ? "1" : "0";
@@ -646,7 +677,9 @@ body[data-asleep="1"] .hub .dot { display:none; }
     $("how").textContent = (cfg.alwaysOn
       ? "The compass stays on until the hunt ends. "
       : `The compass wakes for ${liveText()} every ${Math.round(CYCLE / 60000)} minutes. Set a timer so you don't miss it. `) +
-      "Your location never leaves your phone.";
+      (source === "api"
+        ? "While the compass is live, your phone sends its position to the hunt's server to work out the direction. It is not stored."
+        : "Your location never leaves your phone.");
   }
 
   // Rehearsal tools: for trying a compass window on this phone only. They show
@@ -674,14 +707,6 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const timing = add("p");
     timing.append("Compass live for ", num(LIVE / 1000, 5, 900, v => { LIVE = v * 1000; }),
       " seconds every ", num(CYCLE / 60000, 1, 180, v => { CYCLE = v * 60000; }), " minutes");
-
-    const sel = add("select");
-    sel.setAttribute("aria-label", "Direction style");
-    [["general", "General direction (8 points)"], ["exact", "Exact direction"]].forEach(([value, text]) => {
-      const o = add("option", text); o.value = value; sel.appendChild(o);
-    });
-    sel.value = mode;
-    sel.addEventListener("change", () => { mode = sel.value; render(); });
 
     const note = add("p");
     const jump = add("button", "Jump to 15 seconds before the next window");
@@ -723,7 +748,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const debug = add("p"); debug.id = "debug";
     const tryBox = add("div");
     tryBox.className = "try";
-    tryBox.append(timing, sel, jump, near, note, loaded, debug,
+    tryBox.append(timing, jump, near, note, loaded, debug,
       add("p", "These controls only change this phone, and a change to the real settings overrides them."));
     box.append(add("strong", "Rehearsal tools"),
       add("p", "Only you see this, because you opened the rehearsal link. Players never do."), tryBox);

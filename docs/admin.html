@@ -14,8 +14,9 @@
   it is opened from:
 
   - On the main site, it talks to the hunt's small service (src/worker.js)
-    using a passcode. Changes reach phones within about 15 seconds, and the
-    hiding spot stays on the server.
+    using a passcode. Changes reach phones within about 15 seconds. The
+    hiding spot stays on the server: players' phones are only ever told a
+    direction.
 
   - On the fallback site (GitHub), there is no service. It saves a new copy
     of the settings file (config.json) to the GitHub repo, using a GitHub
@@ -333,7 +334,7 @@ a { color:var(--accent); }
     if (!spot) todo.push("Set the hiding spot. This can wait until the day.");
     else if (spot.lat === 40.73082 && spot.lon === -73.99733) todo.push("The hiding spot is still the placeholder (Washington Square Arch).");
     if (s.end && Date.parse(s.end) > Date.now()) todo.push(`An end time is saved (${clock(s.end)}). Clear it under Mid-hunt unless the hunt should stop then.`);
-    if (s.testMode && spot) todo.push("Rehearsal mode is on, so the saved spot is NOT being kept secret right now. Turn rehearsal mode off under Compass before you save the real spot.");
+    if (s.testMode && spot) todo.push("Rehearsal mode is on, so the compass answers at any time and the saved spot is NOT protected. Turn rehearsal mode off under Compass before you save the real spot.");
     else if (s.testMode) todo.push("Rehearsal mode is on. Turn it off under Compass before the real hunt.");
     if (!todo.length) todo.push("All set.");
     $("todo").textContent = "";
@@ -390,6 +391,13 @@ a { color:var(--accent); }
   async function send(settings, message) {
     if (settings.start && settings.end && Date.parse(settings.end) <= Date.parse(settings.start)) {
       say("saveMsg", "The saved end time is before that start. Tap \"Clear the end time\" (or \"Reopen the hunt\") under Mid-hunt first.", "bad");
+      return;
+    }
+    // In rehearsal mode the compass answers at any time, so a real spot must not be saved with it on.
+    if (settings.testMode && settings.target && !confirm(
+      "Rehearsal mode is on, so the compass answers at any time and this spot is NOT protected.\n\n" +
+      "OK: save it anyway, as a test spot.\nCancel: don't save. Turn rehearsal mode off first for the real spot.")) {
+      say("saveMsg", "Not saved. Untick rehearsal mode under Compass, then save the real spot.", "bad");
       return;
     }
     $("save").disabled = true;
