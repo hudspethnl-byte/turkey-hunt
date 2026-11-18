@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f7f0e3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c140e" media="(prefers-color-scheme: dark)">
+<title>Turkey Hunt organizer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🦃%3C/text%3E%3C/svg%3E">
+
+<!--
+  THE ORGANIZER'S PAGE.
+
+  It changes the hunt's settings (config.json) by saving a new copy to the
+  GitHub repo, using a key the organizer pastes in once. The key stays on
+  that phone and is only ever sent to api.github.com. Players' phones pick
+  up a change once GitHub has republished the site, usually within a
+  minute or two.
+-->
+
+<style>
+:root {
+  --bg:#f7f0e3; --card:#fffaf0; --ink:#2b1d12; --muted:#75604b; --line:#e2d3ba;
+  --accent:#b3401f; --accent-ink:#ffffff; --ok:#2f7d4f; --bad:#a4281b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c140e; --card:#281d14; --ink:#f5ead8; --muted:#b9a58c; --line:#3d2d1f;
+    --accent:#ef7446; --accent-ink:#1c140e; --ok:#7fd0a0; --bad:#ff9a8a;
+  }
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size:16px; line-height:1.45;
+}
+main { max-width:460px; margin:0 auto; padding:20px 16px calc(40px + env(safe-area-inset-bottom)); }
+h1 { font-family:Georgia, "Times New Roman", serif; font-weight:800; font-size:26px; line-height:1.1; margin:4px 0 4px; }
+h2 { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+p { margin:0; }
+.sub { color:var(--muted); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; margin-top:14px; display:grid; gap:10px; }
+.btn {
+  display:block; width:100%; padding:14px 16px; border-radius:14px; border:2px solid var(--ink);
+  background:transparent; color:var(--ink); font-family:inherit; font-weight:700; font-size:17px;
+  line-height:1.2; text-align:center; text-decoration:none; cursor:pointer;
+}
+.btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+.btn:disabled { opacity:.5; }
+label { display:grid; gap:4px; font-weight:600; }
+label.row { display:flex; gap:10px; align-items:center; font-weight:400; }
+input[type="text"], input[type="password"], input[type="number"], input[type="datetime-local"], select {
+  width:100%; font:inherit; font-size:16px; padding:11px 12px; border:1px solid var(--muted); border-radius:10px;
+  background:transparent; color:inherit;
+}
+.pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+input[type="checkbox"] { width:22px; height:22px; flex:none; }
+.msg { font-weight:600; }
+.msg.ok { color:var(--ok); }
+.msg.bad { color:var(--bad); }
+.msg:empty, .sub:empty { display:none; }
+.small { font-size:14px; color:var(--muted); }
+.linkish { background:none; border:none; padding:0; font:inherit; color:var(--accent); text-decoration:underline; cursor:pointer; }
+a { color:var(--accent); }
+</style>
+</head>
+
+<body>
+<main>
+  <header>
+    <h1>Turkey Hunt organizer</h1>
+    <p id="status" class="sub">Paste your key to start.</p>
+  </header>
+
+  <!-- First visit on a phone: paste the key once. -->
+  <section id="keyCard" class="card" hidden>
+    <h2>Organizer key</h2>
+    <p>Paste the key you were sent. It stays on this phone.</p>
+    <input id="keyInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Organizer key">
+    <button id="unlock" class="btn primary" type="button">Unlock</button>
+    <p id="keyMsg" class="msg"></p>
+  </section>
+
+  <div id="panel" hidden>
+    <section class="card">
+      <h2>Mid-hunt</h2>
+      <button id="endgame" class="btn primary" type="button">Endgame: compass on, pointing straight at it</button>
+      <button id="normal" class="btn" type="button">Back to short windows, general direction</button>
+    </section>
+
+    <section class="card">
+      <h2>Hiding spot</h2>
+      <p id="spotNow" class="msg"></p>
+      <button id="here" class="btn primary" type="button">Put the turkey where I'm standing</button>
+      <label>Or paste coordinates from a maps app
+        <input id="coords" type="text" inputmode="text" autocomplete="off" placeholder="40.73082, -73.99733">
+      </label>
+      <p class="small"><a id="mapLink" target="_blank" rel="noopener" hidden>Check the spot on a map</a></p>
+      <button id="noSpot" class="btn" type="button">No spot yet</button>
+      <p class="small">A change here is not sent until you save below.</p>
+    </section>
+
+    <section class="card">
+      <h2>When</h2>
+      <div class="pair">
+        <label>Starts <input id="start" type="datetime-local"></label>
+        <label>Ends <input id="end" type="datetime-local"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Compass</h2>
+      <div class="pair">
+        <label>Live for (seconds) <input id="liveSeconds" type="number" inputmode="numeric" min="5" max="900"></label>
+        <label>Every (minutes) <input id="everyMinutes" type="number" inputmode="numeric" min="1" max="180"></label>
+      </div>
+      <label>Direction
+        <select id="direction">
+          <option value="general">General (8 directions)</option>
+          <option value="exact">Exact (straight at the spot)</option>
+        </select>
+      </label>
+      <label class="row"><input id="alwaysOn" type="checkbox"> Compass always on until the end</label>
+      <label class="row"><input id="testMode" type="checkbox"> Test mode (players see the organizer box)</label>
+    </section>
+
+    <section class="card">
+      <button id="save" class="btn primary" type="button">Save and send to phones</button>
+      <p id="saveMsg" class="msg"></p>
+      <p class="small">Phones pick up a change on their own, usually within a minute or two. Nobody has to reload.</p>
+    </section>
+
+    <p class="small" style="margin-top:16px; text-align:center;">
+      <a href="./">Open the players' page</a> ·
+      <button id="forget" class="linkish" type="button">Forget the key on this phone</button>
+    </p>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const REPO = "hudspethnl-byte/turkey-hunt";
+  const API = `https://api.github.com/repos/${REPO}/contents/config.json`;
+  // Saves show up in the public repo's history under this name, not a personal email.
+  const COMMITTER = { name: "Turkey Hunt organizer", email: "281390078+hudspethnl-byte@users.noreply.github.com" };
+  const KEY_STORE = "turkey-admin-key";
+  const SCRAMBLE = "gobble-gobble-2026";
+  const $ = id => document.getElementById(id);
+
+  let key = "";
+  try { key = localStorage.getItem(KEY_STORE) || ""; } catch (e) {}
+  let saved = null;   // the settings as GitHub has them
+  let sha = null;     // GitHub's version tag for the settings file
+  let spot = null;    // { lat, lon } being edited, or null for "no spot yet"
+
+  /* ---------- the spot is stored scrambled, so it can't be read at a glance ---------- */
+  function scramble(obj) {
+    const s = JSON.stringify(obj);
+    let out = "";
+    for (let i = 0; i < s.length; i++) out += String.fromCharCode(s.charCodeAt(i) ^ SCRAMBLE.charCodeAt(i % SCRAMBLE.length));
+    return "s1:" + btoa(out);
+  }
+  function unscramble(str) {
+    try {
+      const raw = atob(String(str).slice(3));
+      let out = "";
+      for (let i = 0; i < raw.length; i++) out += String.fromCharCode(raw.charCodeAt(i) ^ SCRAMBLE.charCodeAt(i % SCRAMBLE.length));
+      return JSON.parse(out);
+    } catch (e) { return null; }
+  }
+  const readSpot = t => {
+    const o = typeof t === "string" ? unscramble(t) : t;
+    const lat = o ? parseFloat(o.lat) : NaN, lon = o ? parseFloat(o.lon) : NaN;
+    return isFinite(lat) && isFinite(lon) ? { lat, lon } : null;
+  };
+
+  /* ---------- GitHub ---------- */
+  const b64encode = text => btoa(unescape(encodeURIComponent(text)));
+  const b64decode = b64 => decodeURIComponent(escape(atob(b64.replace(/\s/g, ""))));
+  async function gh(method, body) {
+    const res = await fetch(API, {
+      method, cache: "no-store",
+      headers: { "Authorization": `Bearer ${key}`, "Accept": "application/vnd.github+json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) { const e = new Error("GitHub answered " + res.status); e.status = res.status; throw e; }
+    return res.json();
+  }
+  const explain = e =>
+    e.status === 401 ? "That key was refused. It may be mistyped or expired." :
+    e.status === 403 || e.status === 404 ? "That key can't change this hunt's settings." :
+    e.status ? `GitHub answered ${e.status}. Try again in a moment.` :
+    "No connection. Check your signal and try again.";
+
+  async function load() {
+    const data = await gh("GET");
+    sha = data.sha;
+    saved = JSON.parse(b64decode(data.content));
+    fill(saved);
+  }
+
+  async function save(settings, message) {
+    say("saveMsg", "Saving…");
+    const body = () => ({ message, content: b64encode(JSON.stringify(settings, null, 2) + "\n"), sha, committer: COMMITTER });
+    let out;
+    try { out = await gh("PUT", body()); }
+    catch (e) {
+      if (e.status !== 409 && e.status !== 422) throw e;
+      sha = (await gh("GET")).sha;            // someone else saved in between: take their version tag and go again
+      out = await gh("PUT", body());
+    }
+    sha = out.content.sha;
+    saved = settings;
+    fill(saved);
+    watch(settings);
+  }
+
+  // After a save, watch the public copy until it matches, so the organizer knows phones have it.
+  let watchTimer = null;
+  function watch(settings) {
+    clearInterval(watchTimer);
+    const want = JSON.stringify(settings), began = Date.now();
+    say("saveMsg", "Saved. Waiting for it to reach phones…", "ok");
+    watchTimer = setInterval(async () => {
+      const secs = Math.round((Date.now() - began) / 1000);
+      try {
+        const res = await fetch(`config.json?t=${Date.now()}`, { cache: "no-store" });
+        if (res.ok && JSON.stringify(await res.json()) === want) {
+          clearInterval(watchTimer);
+          say("saveMsg", `Phones have it now (took ${secs} seconds).`, "ok");
+          return;
+        }
+      } catch (e) {}
+      if (secs > 360) { clearInterval(watchTimer); say("saveMsg", "Saved, but it is slow to reach phones. Give it a few more minutes.", "bad"); }
+      else say("saveMsg", `Saved. Waiting for it to reach phones… ${secs} s`, "ok");
+    }, 4000);
+  }
+
+  /* ---------- form ---------- */
+  function say(id, text, kind) { const el = $(id); el.textContent = text; el.className = "msg" + (kind ? " " + kind : ""); }
+  const pad = n => String(n).padStart(2, "0");
+  const toInput = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? "" : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const fromInput = v => { const d = new Date(v); return v && !isNaN(d) ? d.toISOString() : null; };
+  const clock = iso => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+  function showSpot(note) {
+    if (spot) {
+      say("spotNow", note || `Spot set: ${spot.lat.toFixed(5)}, ${spot.lon.toFixed(5)}`, "ok");
+      $("mapLink").href = `https://www.google.com/maps?q=${spot.lat.toFixed(6)},${spot.lon.toFixed(6)}`;
+      $("mapLink").hidden = false;
+    } else {
+      say("spotNow", note || "No spot yet. Players see \"The turkey is on the loose.\"");
+      $("mapLink").hidden = true;
+    }
+  }
+
+  function fill(s) {
+    spot = readSpot(s.target);
+    showSpot();
+    $("coords").value = "";
+    $("start").value = s.start ? toInput(s.start) : "";
+    $("end").value = s.end ? toInput(s.end) : "";
+    $("liveSeconds").value = s.liveSeconds;
+    $("everyMinutes").value = s.everyMinutes;
+    $("direction").value = s.direction === "exact" ? "exact" : "general";
+    $("alwaysOn").checked = !!s.alwaysOn;
+    $("testMode").checked = !!s.testMode;
+    $("status").textContent =
+      (s.start && s.end ? `${clock(s.start)} to ${clock(s.end)}` : "No times set") +
+      ` · ${s.alwaysOn ? "compass always on" : `${s.liveSeconds} s every ${s.everyMinutes} min`}` +
+      ` · ${s.direction === "exact" ? "exact" : "general"} · ${spot ? "spot set" : "no spot yet"}`;
+  }
+
+  function collect() {
+    const s = Object.assign({}, saved);
+    s.target = spot ? scramble({ lat: +spot.lat.toFixed(6), lon: +spot.lon.toFixed(6) }) : null;
+    s.start = fromInput($("start").value);
+    s.end = fromInput($("end").value);
+    s.liveSeconds = Math.min(900, Math.max(5, Math.round(parseFloat($("liveSeconds").value) || 30)));
+    s.everyMinutes = Math.min(180, Math.max(1, Math.round(parseFloat($("everyMinutes").value) || 30)));
+    s.direction = $("direction").value;
+    s.alwaysOn = $("alwaysOn").checked;
+    s.testMode = $("testMode").checked;
+    return s;
+  }
+
+  async function send(settings, message) {
+    if (settings.start && settings.end && Date.parse(settings.end) <= Date.parse(settings.start)) {
+      say("saveMsg", "The end has to be after the start.", "bad");
+      return;
+    }
+    $("save").disabled = true;
+    try { await save(settings, message); }
+    catch (e) { say("saveMsg", explain(e), "bad"); }
+    $("save").disabled = false;
+  }
+
+  /* ---------- hiding spot ---------- */
+  function locate() {
+    if (!navigator.geolocation) { showSpot("This browser can't share location. Paste coordinates instead."); return; }
+    say("spotNow", "Finding you… hold still for a few seconds.");
+    let best = null, done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      navigator.geolocation.clearWatch(id);
+      if (!best) { say("spotNow", "Couldn't get a fix. Step outside, or paste coordinates.", "bad"); return; }
+      spot = { lat: best.lat, lon: best.lon };
+      showSpot(`Got it, within ${Math.round(best.acc)} m.${best.acc > 40 ? " That's loose; outdoors is tighter." : ""} Check the map, then save.`);
+    };
+    const id = navigator.geolocation.watchPosition(
+      g => { if (!best || g.coords.accuracy < best.acc) best = { lat: g.coords.latitude, lon: g.coords.longitude, acc: g.coords.accuracy }; },
+      () => finish(),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    setTimeout(() => { if (best) finish(); }, 8000);   // keep the tightest reading from 8 seconds
+    setTimeout(finish, 16000);
+  }
+
+  function pasted() {
+    const m = /(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)/.exec($("coords").value);
+    if (!m) return;
+    const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) { say("spotNow", "Those don't look like coordinates.", "bad"); return; }
+    spot = { lat, lon };
+    showSpot(`Spot read as ${lat.toFixed(5)}, ${lon.toFixed(5)}. Check the map, then save.`);
+  }
+
+  /* ---------- start ---------- */
+  async function open() {
+    $("keyCard").hidden = true;
+    $("status").textContent = "Loading the settings…";
+    try {
+      await load();
+      try { localStorage.setItem(KEY_STORE, key); } catch (e) {}
+      $("panel").hidden = false;
+    } catch (e) {
+      $("keyCard").hidden = false;
+      $("status").textContent = "Paste your key to start.";
+      say("keyMsg", explain(e), "bad");
+    }
+  }
+
+  $("unlock").addEventListener("click", () => { key = $("keyInput").value.trim(); $("keyInput").value = ""; if (key) open(); });
+  $("forget").addEventListener("click", () => {
+    try { localStorage.removeItem(KEY_STORE); } catch (e) {}
+    key = ""; saved = null;
+    $("panel").hidden = true; $("keyCard").hidden = false;
+    $("status").textContent = "Paste your key to start.";
+    say("keyMsg", "Key forgotten on this phone.");
+  });
+  $("here").addEventListener("click", locate);
+  $("coords").addEventListener("input", pasted);
+  $("noSpot").addEventListener("click", () => { spot = null; showSpot("No spot yet. Save to send that to phones."); });
+  $("save").addEventListener("click", () => send(collect(), "Update hunt settings"));
+  $("endgame").addEventListener("click", () => {
+    if (!confirm("Turn the compass on for everyone until the end, pointing straight at the spot?")) return;
+    const s = collect(); s.alwaysOn = true; s.direction = "exact";
+    send(s, "Endgame: compass always on, exact direction");
+  });
+  $("normal").addEventListener("click", () => {
+    if (!confirm("Go back to short compass windows with a general direction?")) return;
+    const s = collect(); s.alwaysOn = false; s.direction = "general";
+    send(s, "Back to short windows, general direction");
+  });
+
+  if (key) open(); else $("keyCard").hidden = false;
+})();
+</script>
+</body>
+</html>

@@ -15,7 +15,8 @@
   This page re-reads config.json every 30 seconds, so a change there reaches
   every phone without anyone reloading. The settings:
 
-    target       where the turkey is hidden, as { "lat": ..., "lon": ... }.
+    target       where the turkey is hidden: either { "lat": ..., "lon": ... }
+                 or the scrambled text the organizer page saves.
                  null means "no spot yet": the compass waits.
     start, end   when the hunt runs. The -05:00 means New York time in November.
     everyMinutes, liveSeconds
@@ -173,6 +174,18 @@ body[data-asleep="1"] .hub .dot { display:none; }
   let cfg = Object.assign({}, DEFAULTS), cfgText = null, cfgLoadedAt = 0, ready = false, TEST = false;
   let START = NaN, END = NaN, CYCLE = 1800000, LIVE = 30000, HEADSUP = 120000, mode = "general", target = null;
 
+  // The organizer page saves the spot scrambled, so it can't be read at a
+  // glance in the settings file. This is a deterrent, not a lock.
+  const SCRAMBLE = "gobble-gobble-2026";
+  function unscramble(str) {
+    try {
+      const raw = atob(String(str).slice(3));
+      let out = "";
+      for (let i = 0; i < raw.length; i++) out += String.fromCharCode(raw.charCodeAt(i) ^ SCRAMBLE.charCodeAt(i % SCRAMBLE.length));
+      return JSON.parse(out);
+    } catch (e) { return null; }
+  }
+
   function applyConfig(raw) {
     cfg = Object.assign({}, DEFAULTS, raw);
     START = Date.parse(cfg.start);
@@ -181,7 +194,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     LIVE = Math.max(5, parseFloat(cfg.liveSeconds) || 30) * 1000;
     HEADSUP = Math.max(0, parseFloat(cfg.headsUpSeconds) || 0) * 1000;
     mode = cfg.direction === "exact" ? "exact" : "general";
-    const lat = cfg.target ? parseFloat(cfg.target.lat) : NaN, lon = cfg.target ? parseFloat(cfg.target.lon) : NaN;
+    const tg = typeof cfg.target === "string" ? unscramble(cfg.target) : cfg.target;
+    const lat = tg ? parseFloat(tg.lat) : NaN, lon = tg ? parseFloat(tg.lon) : NaN;
     target = isFinite(lat) && isFinite(lon) ? { lat, lon } : null;
     document.title = cfg.name;
     $("name").textContent = cfg.name;
