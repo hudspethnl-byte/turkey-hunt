@@ -152,6 +152,10 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
 .how { color:var(--muted); font-size:14px; margin-top:16px; text-align:center; }
 .how:empty { display:none; }
 #times { font-weight:600; }
+.inapp { background:var(--card); border:2px solid var(--accent); border-radius:14px; padding:12px 14px; margin-bottom:14px; }
+.inapp strong { display:block; margin-bottom:4px; }
+.inapp .row { display:grid; gap:8px; margin-top:10px; }
+.inapp .btn { padding:11px 12px; font-size:16px; margin-top:0; }
 .setup { background:var(--warn-bg); color:var(--warn-ink); border-radius:14px; padding:12px 14px; margin-bottom:14px; font-size:14px; }
 .setup strong { display:block; margin-bottom:4px; }
 .setup ul { margin:0; padding-left:18px; }
@@ -166,6 +170,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
 
 <body data-state="before">
 <main>
+  <div id="inapp" class="inapp" hidden></div>
   <div id="setup" class="setup" hidden></div>
 
   <header>
@@ -238,6 +243,12 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     if (isFinite(h)) fakeHeading = ((h % 360) + 360) % 360;
   }
   const now = () => Date.now() + clockOffset;
+
+  /* ---------- in-app browsers (a link tapped inside Instagram and similar) ---------- */
+  const ua = navigator.userAgent || "";
+  const inAppHit = /Instagram|FBAN|FBAV|FB_IAB|Barcelona|Snapchat|TikTok|musical_ly|Bytedance|LinkedInApp/i.exec(ua);
+  let inApp = !inAppHit ? null : /Instagram/i.test(inAppHit[0]) ? "Instagram" : /^FB/i.test(inAppHit[0]) ? "Facebook" : "this app";
+  if (TEST && qs.get("inapp")) inApp = qs.get("inapp");   // test mode: ?inapp=Instagram shows the prompt
 
   /* ---------- schedule ---------- */
   function phase(t) {
@@ -508,6 +519,9 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     }
     $("diag").textContent = diag;
 
+    // The "open in Safari or Chrome" prompt goes away once the compass and GPS both work here.
+    if (inApp) $("inapp").hidden = heading !== null && !!pos;
+
     // The next few compass times, so people know when to have their phone out.
     const times = [];
     for (let w = t < START ? START : START + Math.ceil((t - START + 1) / CYCLE) * CYCLE; w < END && times.length < 6; w += CYCLE) times.push(fmtClock(w));
@@ -556,6 +570,39 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
         v.amount ? `Pay $${v.amount} on Venmo` : "Pay on Venmo");
     }
     if (HUNT.chatLink) link(HUNT.chatLink, "Open the group chat");
+  }
+
+  // Shown when the page is opened inside another app's built-in browser,
+  // where phones often refuse to hand over the compass or location.
+  function buildInApp() {
+    if (!inApp) return;
+    const pageUrl = location.origin + location.pathname;
+    const who = inApp === "this app" ? "this app's" : `${inApp}'s`;
+    const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; return e; };
+
+    const open = add("button", "Open in my browser", "btn primary");
+    open.type = "button";
+    open.addEventListener("click", () => {
+      if (/iPhone|iPad|iPod/i.test(ua)) location.href = "x-safari-" + pageUrl;                       // iPhone: hand the link to Safari
+      else if (/Android/i.test(ua)) location.href = `intent://${pageUrl.replace(/^https?:\/\//, "")}#Intent;scheme=https;end`;  // Android: default browser
+      else window.open(pageUrl, "_blank");
+    });
+
+    const copy = add("button", "Copy the link", "btn");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(pageUrl); copy.textContent = "Copied. Paste it in Safari or Chrome."; }
+      catch (e) { copy.textContent = "Couldn't copy. Use the ⋯ menu instead."; }
+    });
+
+    const row = add("div", "", "row");
+    row.append(open, copy);
+    const box = $("inapp");
+    box.append(
+      add("strong", "Open this page in Safari or Chrome"),
+      add("p", `You're in ${who} built-in browser, where the compass often can't start. Tap the ⋯ menu at the top of the screen and choose "Open in external browser", or use the buttons below.`),
+      row);
+    box.hidden = false;
   }
 
   function setHow() {
@@ -656,6 +703,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   setHow();
   buildRose();
   buildActions();
+  buildInApp();
   buildSetup();
   $("enable").addEventListener("click", enable);
   document.addEventListener("visibilitychange", () => {
