@@ -38,18 +38,32 @@ const HUNT = {
   warmth: false,
 
   // Hints unlock this many minutes after the start. Add or remove lines.
+  // These are samples written for the placeholder spot. When a hint is
+  // real, delete its `sample: true`.
   hints: [
-    { afterMinutes: 0,   text: "SAMPLE hint 1: the vaguest one. Which neighborhood?" },
-    { afterMinutes: 45,  text: "SAMPLE hint 2: narrows it to a few blocks." },
-    { afterMinutes: 90,  text: "SAMPLE hint 3: something you can see from the spot." },
-    { afterMinutes: 135, text: "SAMPLE hint 4: the giveaway." },
+    { afterMinutes: 0,   text: "The turkey is below 14th Street.", sample: true },
+    { afterMinutes: 45,  text: "Students cut through here on their way to class.", sample: true },
+    { afterMinutes: 90,  text: "Listen for chess clocks and a piano.", sample: true },
+    { afterMinutes: 135, text: "Look under the arch.", sample: true },
   ],
 
-  // Pay button. Leave username as "" to hide it.
-  venmo: { username: "", amount: 20, note: "Turkey Hunt" },
+  // A few lines of rules shown on the page. Samples for now; delete
+  // `sample: true` from a line once it is real. Use [] to hide them.
+  rules: [
+    { text: "Teams of up to four, with one phone on the compass per team.", sample: true },
+    { text: "On foot only. No bikes, cars or subway.", sample: true },
+    { text: "The first team to reach the turkey wins the pot.", sample: true },
+  ],
 
-  // Invite link to the group chat (WhatsApp, GroupMe...). "" hides the button.
-  chatLink: "",
+  // Pay button. `blurb` is the line shown above it. While username is ""
+  // and test mode is on, the button is a demo: it opens Venmo with the
+  // amount and note filled in and no recipient. With test mode off and no
+  // username, the button is hidden.
+  venmo: { username: "", amount: 20, note: "Turkey Hunt", blurb: "Entry is $20 a person, paid to the organizer before the start." },
+
+  // Link to the group chat. This one just opens Instagram messages; swap in
+  // the group's own invite link if it has one. "" hides the button.
+  chatLink: "https://www.instagram.com/direct/inbox/",
 
   // The picture on the compass.
   pointer: "🦃",
@@ -138,8 +152,13 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   line-height:1.2; text-align:center; text-decoration:none; cursor:pointer;
 }
 .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); margin-top:12px; }
-.actions { display:grid; gap:10px; margin-top:14px; }
+.actions { display:grid; gap:10px; margin-top:12px; }
 .actions:empty { display:none; }
+.actions .btn { margin-top:0; }
+.rules { margin:0 0 12px; padding-left:20px; }
+.rules:empty, .entry:empty { display:none; }
+.rules li { margin:5px 0; }
+.entry { font-weight:600; }
 
 .hints { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
 .hints li { border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
@@ -208,7 +227,12 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     <ol id="hints" class="hints"></ol>
   </section>
 
-  <nav id="actions" class="actions" aria-label="Pay and chat"></nav>
+  <section id="game" class="card" aria-label="Rules, entry and chat" hidden>
+    <h2>The game</h2>
+    <ul id="rules" class="rules"></ul>
+    <p id="entry" class="entry"></p>
+    <nav id="actions" class="actions" aria-label="Pay and chat"></nav>
+  </section>
   <p id="times" class="how"></p>
   <p id="how" class="how"></p>
 </main>
@@ -561,15 +585,26 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
       a.textContent = text;
       nav.appendChild(a);
     };
-    const v = HUNT.venmo;
-    if (v && v.username) {
+    const rules = HUNT.rules || [];
+    rules.forEach(r => { const li = document.createElement("li"); li.textContent = r.text; $("rules").appendChild(li); });
+
+    // With no username, test mode shows a demo button: Venmo opens with the
+    // amount and note filled in and the recipient left blank.
+    const v = HUNT.venmo || {};
+    const showPay = !!v.username || TEST;
+    if (showPay) {
       const params = new URLSearchParams({ txn: "pay" });
       if (v.amount) params.set("amount", String(v.amount));
       if (v.note) params.set("note", v.note);
-      link(`https://venmo.com/${encodeURIComponent(v.username.replace(/^@/, ""))}?${params}`,
-        v.amount ? `Pay $${v.amount} on Venmo` : "Pay on Venmo");
+      const who = v.username ? encodeURIComponent(v.username.replace(/^@/, "")) : "";
+      link(`https://venmo.com/${who}?${params}`, v.amount ? `Pay $${v.amount} on Venmo` : "Pay on Venmo", true);
+      $("entry").textContent = v.blurb || "";
     }
-    if (HUNT.chatLink) link(HUNT.chatLink, "Open the group chat");
+    if (HUNT.chatLink) {
+      const where = /instagram\.com|ig\.me/i.test(HUNT.chatLink) ? " on Instagram" : /whatsapp/i.test(HUNT.chatLink) ? " on WhatsApp" : "";
+      link(HUNT.chatLink, `Open the group chat${where}`);
+    }
+    $("game").hidden = !(rules.length || showPay || HUNT.chatLink);
   }
 
   // Shown when the page is opened inside another app's built-in browser,
@@ -622,9 +657,11 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     if (isNaN(START) || isNaN(END) || END <= START) item("The start or end time isn't readable.");
     const spotLi = (HUNT.target.lat === PLACEHOLDER.lat && HUNT.target.lon === PLACEHOLDER.lon)
       ? item("The hiding spot is still a placeholder (Washington Square Arch), so direction and distance are measured to there.") : null;
-    if (hints.some(h => /^sample/i.test(h.text))) item("The hints are still samples.");
-    if (!HUNT.venmo || !HUNT.venmo.username) item("No Venmo username yet, so the pay button is hidden.");
+    if (hints.some(h => h.sample)) item("The hints are samples written for the placeholder spot.");
+    if ((HUNT.rules || []).some(r => r.sample)) item("The rules and the entry line are samples.");
+    if (!HUNT.venmo || !HUNT.venmo.username) item("No Venmo username yet, so the pay button is a demo: it opens Venmo with the amount and note filled in and no recipient.");
     if (!HUNT.chatLink) item("No group chat link yet, so the chat button is hidden.");
+    else if (/instagram\.com\/direct\/inbox/i.test(HUNT.chatLink)) item("The chat button opens Instagram messages in general. Swap in the group's invite link if it has one.");
     item("Test mode is on. Set testMode to false before sharing the link.");
 
     const num = (value, min, max, apply) => {
