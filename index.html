@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f7f0e3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c140e" media="(prefers-color-scheme: dark)">
+<title>Turkey Hunt</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🦃%3C/text%3E%3C/svg%3E">
+
+<script>
+/* =====================================================================
+   HUNT SETTINGS. This block is the only thing you need to edit.
+   ===================================================================== */
+const HUNT = {
+  name: "The Turkey Hunt",
+
+  // Where the turkey is hidden. In Google Maps, press and hold the exact
+  // spot, then tap the coordinates that appear to copy them.
+  target: { lat: 40.73082, lon: -73.99733 },   // PLACEHOLDER: Washington Square Arch
+
+  // Start and end. The -05:00 on the end means New York time in November.
+  start: "2026-11-21T13:00:00-05:00",
+  end:   "2026-11-21T16:00:00-05:00",
+
+  // The compass wakes up for `liveMinutes` at the top of every
+  // `everyMinutes`, starting the moment the hunt starts.
+  compass: { everyMinutes: 20, liveMinutes: 3 },
+
+  // Show the warmer / colder bar under the compass (true or false).
+  warmth: true,
+
+  // Hints unlock this many minutes after the start. Add or remove lines.
+  hints: [
+    { afterMinutes: 0,   text: "SAMPLE hint 1: the vaguest one. Which neighborhood?" },
+    { afterMinutes: 45,  text: "SAMPLE hint 2: narrows it to a few blocks." },
+    { afterMinutes: 90,  text: "SAMPLE hint 3: something you can see from the spot." },
+    { afterMinutes: 135, text: "SAMPLE hint 4: the giveaway." },
+  ],
+
+  // Pay button. Leave username as "" to hide it.
+  venmo: { username: "", amount: 20, note: "Turkey Hunt" },
+
+  // Invite link to the group chat (WhatsApp, GroupMe...). "" hides the button.
+  chatLink: "",
+
+  // The picture on the compass.
+  pointer: "🦃",
+
+  // Phone compasses read magnetic north; this corrects to true north.
+  // -12.5 is New York City. Only change it for a hunt in another city.
+  declination: -12.5,
+
+  // Test mode shows the organizer checklist and lets you fake the time and
+  // place from the link (see the checklist). Set to false before sharing.
+  testMode: true,
+};
+</script>
+
+<style>
+:root {
+  --bg:#f7f0e3; --card:#fffaf0; --ink:#2b1d12; --muted:#75604b; --line:#e2d3ba;
+  --accent:#b3401f; --accent-ink:#ffffff; --warn-bg:#fff1c9; --warn-ink:#5c4300;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c140e; --card:#281d14; --ink:#f5ead8; --muted:#b9a58c; --line:#3d2d1f;
+    --accent:#ef7446; --accent-ink:#1c140e; --warn-bg:#3d3212; --warn-ink:#f3dc9a;
+  }
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size:16px; line-height:1.45;
+}
+main { max-width:460px; margin:0 auto; padding:20px 16px calc(28px + env(safe-area-inset-bottom)); }
+h1 { font-family:Georgia, "Times New Roman", serif; font-weight:800; font-size:30px; line-height:1.1; margin:4px 0 4px; }
+h2 { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+p { margin:0; }
+.when { color:var(--muted); font-weight:600; }
+
+.card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px 16px; margin-top:14px; }
+.compass { text-align:center; }
+.headline { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700; }
+.count { font-size:46px; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; margin-top:2px; }
+.count:empty { display:none; }
+.countLabel { color:var(--muted); }
+body[data-state="live"] .headline, body[data-state="live"] .count { color:var(--accent); }
+
+.dial { position:relative; width:min(300px, 78vw); aspect-ratio:1; margin:16px auto 12px; }
+.rose, .needle, .needle svg { position:absolute; inset:0; width:100%; height:100%; }
+.rose { transition:transform .2s linear, opacity .4s; }
+.rose .ring { fill:none; stroke:var(--ink); stroke-width:2; }
+.rose .ring.faint { stroke:var(--line); stroke-width:1.5; }
+.rose line { stroke:var(--muted); stroke-width:1.5; stroke-linecap:round; }
+.rose text { fill:var(--muted); font-family:-apple-system, "Segoe UI", Roboto, sans-serif; font-weight:700; font-size:17px; text-anchor:middle; dominant-baseline:central; }
+.rose text.n { fill:var(--accent); font-size:21px; }
+body[data-state="dark"] .rose, body[data-state="over"] .rose { opacity:.35; }
+
+.needle { opacity:0; transition:transform .2s linear, opacity .3s; pointer-events:none; }
+body[data-needle="1"] .needle { opacity:1; }
+.needle line { stroke:var(--accent); stroke-width:5; stroke-linecap:round; }
+.needle path { fill:var(--accent); }
+.birdwrap { position:absolute; left:40%; top:10.67%; width:20%; height:20%; display:grid; place-items:center; }
+.bird { display:block; font-size:clamp(38px, 12.5vw, 50px); line-height:1; transition:transform .2s linear; }
+
+.hub { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; }
+.hub .dot { grid-area:1/1; width:14px; height:14px; border-radius:50%; background:var(--ink); }
+.hub .icon { grid-area:1/1; font-size:58px; line-height:1; }
+body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:none; }
+
+.dir { font-size:19px; font-weight:700; min-height:1.45em; }
+.dir:empty { display:none; }
+.heat { display:flex; gap:5px; justify-content:center; margin:10px 0 4px; }
+.heat i { width:36px; height:8px; border-radius:4px; background:var(--line); }
+.heat i.on { background:var(--accent); }
+.warm { color:var(--muted); }
+.warm:empty, .diag:empty { display:none; }
+.diag { color:var(--muted); font-size:14px; margin-top:10px; }
+
+.btn {
+  display:block; width:100%; padding:14px 16px; border-radius:14px; border:2px solid var(--ink);
+  background:transparent; color:var(--ink); font-family:inherit; font-weight:700; font-size:17px;
+  line-height:1.2; text-align:center; text-decoration:none; cursor:pointer;
+}
+.btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); margin-top:12px; }
+.actions { display:grid; gap:10px; margin-top:14px; }
+.actions:empty { display:none; }
+
+.hints { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+.hints li { border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+.hints .tag { display:block; font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+.hints li.open { border-color:var(--ink); }
+.hints li.open p { font-size:17px; }
+.hints li.locked p { color:var(--muted); font-variant-numeric:tabular-nums; }
+.hints li.new { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
+
+.how { color:var(--muted); font-size:14px; margin-top:16px; text-align:center; }
+.setup { background:var(--warn-bg); color:var(--warn-ink); border-radius:14px; padding:12px 14px; margin-bottom:14px; font-size:14px; }
+.setup strong { display:block; margin-bottom:4px; }
+.setup ul { margin:0; padding-left:18px; }
+.setup code { font-size:12px; word-break:break-all; }
+</style>
+</head>
+
+<body data-state="before">
+<main>
+  <div id="setup" class="setup" hidden></div>
+
+  <header>
+    <h1 id="name"></h1>
+    <p id="when" class="when"></p>
+  </header>
+
+  <section class="card compass" aria-label="Compass">
+    <p id="headline" class="headline" aria-live="polite"></p>
+    <p id="count" class="count"></p>
+    <p id="countLabel" class="countLabel"></p>
+
+    <div class="dial" aria-hidden="true">
+      <svg id="rose" class="rose" viewBox="0 0 300 300"></svg>
+      <div id="needle" class="needle">
+        <svg viewBox="0 0 300 300">
+          <line x1="150" y1="150" x2="150" y2="118"></line>
+          <path d="M150 94 L138 120 L162 120 Z"></path>
+        </svg>
+        <span class="birdwrap"><span id="bird" class="bird"></span></span>
+      </div>
+      <div class="hub"><span class="dot"></span><span id="hubIcon" class="icon"></span></div>
+    </div>
+
+    <p id="dir" class="dir"></p>
+    <div id="heat" class="heat" hidden><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <p id="warm" class="warm"></p>
+    <button id="enable" class="btn primary" type="button" hidden></button>
+    <p id="diag" class="diag"></p>
+  </section>
+
+  <section class="card" aria-label="Hints">
+    <h2>Hints</h2>
+    <ol id="hints" class="hints"></ol>
+  </section>
+
+  <nav id="actions" class="actions" aria-label="Pay and chat"></nav>
+  <p id="how" class="how"></p>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const qs = new URLSearchParams(location.search);
+  const TEST = !!HUNT.testMode;
+  const PLACEHOLDER = { lat: 40.73082, lon: -73.99733 };
+
+  const START = Date.parse(HUNT.start);
+  const END = Date.parse(HUNT.end);
+  const CYCLE = HUNT.compass.everyMinutes * 60000;
+  const LIVE = HUNT.compass.liveMinutes * 60000;
+  const hints = [...HUNT.hints].sort((a, b) => a.afterMinutes - b.afterMinutes);
+
+  /* ---------- test-mode overrides (ignored when testMode is false) ---------- */
+  let clockOffset = 0, fakePos = null, fakeHeading = null;
+  if (TEST) {
+    const n = Date.parse(qs.get("now") || "");
+    if (!isNaN(n)) clockOffset = n - Date.now();
+    const p = (qs.get("pos") || "").split(",").map(Number);
+    if (p.length === 2 && p.every(isFinite)) fakePos = { lat: p[0], lon: p[1], acc: 10, t: Infinity };
+    const h = parseFloat(qs.get("heading"));
+    if (isFinite(h)) fakeHeading = ((h % 360) + 360) % 360;
+  }
+  const now = () => Date.now() + clockOffset;
+
+  /* ---------- schedule ---------- */
+  function phase(t) {
+    if (t < START) return { state: "before", until: START };
+    if (t >= END) return { state: "over", until: null };
+    const into = (t - START) % CYCLE;
+    if (into < LIVE) return { state: "live", until: Math.min(t - into + LIVE, END) };
+    const next = t - into + CYCLE;
+    return { state: "dark", until: next < END ? next : null };
+  }
+
+  /* ---------- formatting ---------- */
+  const fmtClock = ms => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const fmtDay = ms => new Date(ms).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+  function fmtLeft(ms) {
+    let s = Math.max(0, Math.ceil(ms / 1000));
+    const d = Math.floor(s / 86400); s -= d * 86400;
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const m = Math.floor(s / 60); s -= m * 60;
+    const pad = n => String(n).padStart(2, "0");
+    if (d) return `${d}d ${h}h ${pad(m)}m`;
+    if (h) return `${h}:${pad(m)}:${pad(s)}`;
+    return `${m}:${pad(s)}`;
+  }
+
+  /* ---------- geometry ---------- */
+  const rad = d => d * Math.PI / 180;
+  const deg = r => r * 180 / Math.PI;
+  function bearingTo(a, b) {
+    const p1 = rad(a.lat), p2 = rad(b.lat), dl = rad(b.lon - a.lon);
+    const y = Math.sin(dl) * Math.cos(p2);
+    const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+    return (deg(Math.atan2(y, x)) + 360) % 360;
+  }
+  function metersBetween(a, b) {
+    const dp = rad(b.lat - a.lat), dl = rad(b.lon - a.lon);
+    const h = Math.sin(dp / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dl / 2) ** 2;
+    return 2 * 6371000 * Math.asin(Math.sqrt(h));
+  }
+  const WORDS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+  const BANDS = [ // [closer than this many meters, bars lit, label]
+    [120, 6, "Scorching. It's within a block or two. Read the hints."],
+    [300, 5, "Hot. A few blocks out."],
+    [700, 4, "Warm. Under half a mile."],
+    [1500, 3, "Lukewarm. Under a mile."],
+    [3000, 2, "Cold. A mile or two."],
+    [Infinity, 1, "Ice cold. More than two miles."],
+  ];
+  const shortest = (from, to) => ((to - from + 540) % 360) - 180;
+  const turn = (current, target) => current + shortest(((current % 360) + 360) % 360, target);
+
+  /* ---------- sensors ---------- */
+  let sensorsOn = false, sensorsSince = 0;
+  let pos = null;            // { lat, lon, acc, t }
+  let heading = null;        // degrees clockwise from true north, smoothed
+  let geoWatch = null, geoError = null, compassDenied = false;
+  let wake = null, wakePending = false;
+
+  function onOrient(e) {
+    let h = null;
+    if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) h = e.webkitCompassHeading; // iPhone
+    else if (e.absolute && typeof e.alpha === "number") h = 360 - e.alpha;                                       // Android
+    if (h === null) return;
+    const screenAngle = (screen.orientation && typeof screen.orientation.angle === "number")
+      ? screen.orientation.angle : (window.orientation || 0);
+    h = (h + screenAngle + (HUNT.declination || 0) + 720) % 360;
+    heading = heading === null ? h : (heading + shortest(heading, h) * 0.3 + 360) % 360;
+    drawDial();
+  }
+
+  function startGeo() {
+    if (geoWatch !== null) return;
+    if (!navigator.geolocation) { geoError = "unsupported"; return; }
+    geoWatch = navigator.geolocation.watchPosition(
+      g => { pos = { lat: g.coords.latitude, lon: g.coords.longitude, acc: g.coords.accuracy, t: Date.now() }; geoError = null; render(); },
+      err => { if (err.code === 1) { geoError = "denied"; stopGeo(); render(); } },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  }
+  function stopGeo() {
+    if (geoWatch !== null) { navigator.geolocation.clearWatch(geoWatch); geoWatch = null; }
+  }
+
+  async function keepAwake(on) {
+    try {
+      if (on && !wake && !wakePending && "wakeLock" in navigator && document.visibilityState === "visible") {
+        wakePending = true;
+        wake = await navigator.wakeLock.request("screen");
+        wake.addEventListener("release", () => { wake = null; });
+      } else if (!on && wake) {
+        const w = wake; wake = null; await w.release();
+      }
+    } catch (e) { wake = null; }
+    wakePending = false;
+  }
+  const buzz = () => { try { if (navigator.vibrate) navigator.vibrate(200); } catch (e) {} };
+
+  async function enable() {
+    sensorsOn = true; sensorsSince = Date.now();
+    if (fakeHeading !== null) {
+      heading = fakeHeading;
+    } else {
+      try { // iPhone only hands over the compass when asked from a tap
+        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+          if (await DeviceOrientationEvent.requestPermission() !== "granted") compassDenied = true;
+        }
+      } catch (e) { compassDenied = true; }
+      // Listen either way: a real reading always wins over a "denied" answer.
+      window.addEventListener("deviceorientationabsolute", onOrient, true);
+      window.addEventListener("deviceorientation", onOrient, true);
+    }
+    if (fakePos) pos = fakePos;
+    if (phase(now()).state === "live") keepAwake(true);
+    render();
+  }
+
+  /* ---------- drawing ---------- */
+  let roseRot = 0, needleRot = 0;
+  function drawDial() {
+    const h = heading === null ? 0 : heading;   // no compass: north is the top of the dial
+    roseRot = turn(roseRot, (360 - h) % 360);
+    $("rose").style.transform = `rotate(${roseRot}deg)`;
+    if (document.body.dataset.needle === "1" && pos) {
+      needleRot = turn(needleRot, (bearingTo(pos, HUNT.target) - h + 360) % 360);
+      $("needle").style.transform = `rotate(${needleRot}deg)`;
+      $("bird").style.transform = `rotate(${-needleRot}deg)`;
+    }
+  }
+
+  let lastState = null, lastOpen = -1;
+  function renderHints(t) {
+    const open = hints.filter(h => t >= START + h.afterMinutes * 60000).length;
+    if (open !== lastOpen) {
+      const ol = $("hints");
+      ol.textContent = "";
+      hints.forEach((h, i) => {
+        const at = START + h.afterMinutes * 60000;
+        const li = document.createElement("li");
+        const tag = document.createElement("span");
+        const body = document.createElement("p");
+        tag.className = "tag";
+        if (i < open) {
+          li.className = "open";
+          tag.textContent = `Hint ${i + 1} · ${fmtClock(at)}`;
+          body.textContent = h.text;
+        } else {
+          li.className = "locked";
+          tag.textContent = `Hint ${i + 1}`;
+          body.dataset.at = at;
+        }
+        li.append(tag, body);
+        ol.appendChild(li);
+      });
+      if (lastOpen !== -1 && open > lastOpen) {
+        const fresh = ol.children[open - 1];
+        if (fresh) { fresh.classList.add("new"); setTimeout(() => fresh.classList.remove("new"), 20000); }
+        buzz();
+      }
+      lastOpen = open;
+    }
+    document.querySelectorAll("#hints p[data-at]").forEach(el => {
+      const at = +el.dataset.at;
+      el.textContent = `Unlocks at ${fmtClock(at)} · in ${fmtLeft(at - t)}`;
+    });
+  }
+
+  function render() {
+    const t = now(), p = phase(t), state = p.state;
+    document.body.dataset.state = state;
+
+    if (lastState !== null && state !== lastState) {
+      if (state === "live") { buzz(); if (sensorsOn) keepAwake(true); }
+      else keepAwake(false);
+    }
+    lastState = state;
+
+    // GPS only runs when it is needed: during a live window, the 30 seconds
+    // before one, and once before the start so people can check their phone.
+    const soon = state === "dark" && p.until && p.until - t < 30000;
+    const wantGeo = sensorsOn && !fakePos && geoError !== "denied" && geoError !== "unsupported" &&
+      (state === "live" || soon || (state === "before" && !pos));
+    if (wantGeo) startGeo(); else stopGeo();
+    const fresh = !!pos && (Date.now() - pos.t < 30000);
+
+    $("when").textContent =
+      state === "before" ? `Starts ${fmtDay(START)} at ${fmtClock(START)}` :
+      state === "over" ? `Ended ${fmtDay(END)} at ${fmtClock(END)}` :
+      `On now, until ${fmtClock(END)}`;
+
+    let headline = "", count = "", label = "", dir = "", warm = "", bars = 0, hub = "";
+    if (state === "before") {
+      headline = "The hunt starts in";
+      count = fmtLeft(START - t);
+      label = sensorsOn ? "" : "Check your phone now so you're ready at the start.";
+      if (sensorsOn && pos && heading !== null) dir = "You're set. The red N is north.";
+    } else if (state === "live") {
+      headline = "The compass is live";
+      count = fmtLeft(p.until - t);
+      label = "until it goes dark";
+    } else if (state === "dark") {
+      headline = "The turkey is hiding";
+      hub = "💤";
+      if (p.until) { count = fmtLeft(p.until - t); label = `until the compass is back at ${fmtClock(p.until)}`; }
+      else label = "No more compass windows. It's hints only from here.";
+    } else {
+      headline = "The hunt is over";
+      label = "Thanks for playing.";
+      hub = HUNT.pointer;
+    }
+
+    let showNeedle = false;
+    if (state === "live" && sensorsOn) {
+      if (geoError === "denied") dir = "Location is blocked for this page. Allow it in your browser settings, then reload.";
+      else if (geoError === "unsupported") dir = "This browser can't share location. Open the link in Safari or Chrome.";
+      else if (!fresh) dir = "Finding you…";
+      else {
+        showNeedle = true;
+        dir = `The turkey is ${WORDS[Math.round(bearingTo(pos, HUNT.target) / 45) % 8]} of you.`;
+        if (HUNT.warmth) {
+          const band = BANDS.find(b => metersBetween(pos, HUNT.target) < b[0]);
+          bars = band[1]; warm = band[2];
+        }
+      }
+    }
+    document.body.dataset.needle = showNeedle ? "1" : "0";
+
+    $("headline").textContent = headline;
+    $("count").textContent = count;
+    $("countLabel").textContent = label;
+    $("dir").textContent = dir;
+    $("warm").textContent = warm;
+    $("hubIcon").textContent = hub;
+    $("heat").hidden = !bars;
+    [...$("heat").children].forEach((el, i) => el.classList.toggle("on", i < bars));
+
+    const btn = $("enable");
+    btn.hidden = sensorsOn || state === "over";
+    btn.textContent = state === "before" ? "Check my compass" : "Turn on the compass";
+
+    let diag = "";
+    if (sensorsOn && state !== "over") {
+      const waited = Date.now() - sensorsSince > 3000;
+      const c = heading !== null ? "Compass working."
+        : compassDenied ? "Compass blocked. Close this tab and reopen the link to be asked again. Until then, north is the top of the dial."
+        : waited ? "No compass signal on this device, so north is the top of the dial. If you're inside another app, open the link in Safari or Chrome."
+        : "Waiting for the compass…";
+      let g = "";
+      if (state === "before" || state === "live") {
+        g = geoError === "denied" ? " Location blocked."
+          : geoError === "unsupported" ? " No location in this browser."
+          : pos ? ` GPS within ${Math.round(pos.acc)} m.${pos.acc > 100 ? " That's fuzzy. Step into the open." : ""}`
+          : " Waiting for GPS…";
+      }
+      diag = c + g;
+    }
+    $("diag").textContent = diag;
+
+    renderHints(t);
+    drawDial();
+  }
+
+  /* ---------- one-time setup ---------- */
+  function buildRose() {
+    const NS = "http://www.w3.org/2000/svg";
+    const el = (tag, attrs, text) => {
+      const e = document.createElementNS(NS, tag);
+      for (const k in attrs) e.setAttribute(k, attrs[k]);
+      if (text) e.textContent = text;
+      return e;
+    };
+    const rose = $("rose");
+    rose.appendChild(el("circle", { cx: 150, cy: 150, r: 147, class: "ring" }));
+    rose.appendChild(el("circle", { cx: 150, cy: 150, r: 119, class: "ring faint" }));
+    for (let a = 0; a < 360; a += 10) {
+      if (a % 90 === 0) continue;
+      rose.appendChild(el("line", { x1: 150, y1: 4, x2: 150, y2: a % 30 === 0 ? 13 : 9, transform: `rotate(${a} 150 150)` }));
+    }
+    ["N", "E", "S", "W"].forEach((letter, i) => {
+      rose.appendChild(el("text", { x: 150, y: 19, class: letter === "N" ? "n" : "", transform: `rotate(${i * 90} 150 150)` }, letter));
+    });
+  }
+
+  function buildActions() {
+    const nav = $("actions");
+    const link = (href, text, primary) => {
+      const a = document.createElement("a");
+      a.className = "btn" + (primary ? " primary" : "");
+      a.href = href; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = text;
+      nav.appendChild(a);
+    };
+    const v = HUNT.venmo;
+    if (v && v.username) {
+      const params = new URLSearchParams({ txn: "pay" });
+      if (v.amount) params.set("amount", String(v.amount));
+      if (v.note) params.set("note", v.note);
+      link(`https://venmo.com/${encodeURIComponent(v.username.replace(/^@/, ""))}?${params}`,
+        v.amount ? `Pay $${v.amount} on Venmo` : "Pay on Venmo");
+    }
+    if (HUNT.chatLink) link(HUNT.chatLink, "Open the group chat");
+  }
+
+  function buildSetup() {
+    if (!TEST) return;
+    const todo = [];
+    if (isNaN(START) || isNaN(END) || END <= START) todo.push("The start or end time isn't readable.");
+    if (HUNT.target.lat === PLACEHOLDER.lat && HUNT.target.lon === PLACEHOLDER.lon) todo.push("The hiding spot is still the placeholder (Washington Square Arch).");
+    if (hints.some(h => /^sample/i.test(h.text))) todo.push("The hints are still samples.");
+    if (!HUNT.venmo || !HUNT.venmo.username) todo.push("No Venmo username yet, so the pay button is hidden.");
+    if (!HUNT.chatLink) todo.push("No group chat link yet, so the chat button is hidden.");
+    todo.push("Test mode is on. Set testMode to false before sharing the link.");
+    const box = $("setup");
+    const title = document.createElement("strong");
+    title.textContent = "Organizer checklist";
+    const ul = document.createElement("ul");
+    todo.forEach(text => { const li = document.createElement("li"); li.textContent = text; ul.appendChild(li); });
+    const tip = document.createElement("p");
+    tip.append("To rehearse, add a fake time to the link: ");
+    const code = document.createElement("code");
+    code.textContent = `?now=${HUNT.start.slice(0, 14)}01:00${HUNT.start.slice(19)}`;
+    tip.append(code);
+    box.append(title, ul, tip);
+    box.hidden = false;
+  }
+
+  document.title = HUNT.name;
+  $("name").textContent = HUNT.name;
+  $("bird").textContent = HUNT.pointer;
+  $("how").textContent = `The compass wakes for ${HUNT.compass.liveMinutes} minutes every ${HUNT.compass.everyMinutes}. ` +
+    "Hints unlock as the hunt goes on. Your location never leaves your phone.";
+  buildRose();
+  buildActions();
+  buildSetup();
+  $("enable").addEventListener("click", enable);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      if (sensorsOn && phase(now()).state === "live") keepAwake(true);
+      render();
+    }
+  });
+  render();
+  setInterval(render, 500);
+})();
+</script>
+</body>
+</html>
