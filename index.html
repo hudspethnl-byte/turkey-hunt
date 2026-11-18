@@ -26,14 +26,16 @@ const HUNT = {
 
   // The compass wakes up for `liveSeconds` at the top of every
   // `everyMinutes`, starting the moment the hunt starts.
-  compass: { everyMinutes: 30, liveSeconds: 30 },
+  // `headsUpSeconds` is how long before each window the page switches to
+  // "The turkey is stirring" as a coming-soon reminder.
+  compass: { everyMinutes: 30, liveSeconds: 30, headsUpSeconds: 120 },
 
   // "general" snaps the turkey to the nearest of 8 directions (north,
   // northeast, east...). "exact" points straight at the spot.
   direction: "general",
 
   // Show the warmer / colder bar under the compass (true or false).
-  warmth: true,
+  warmth: false,
 
   // Hints unlock this many minutes after the start. Add or remove lines.
   hints: [
@@ -104,6 +106,8 @@ body[data-state="live"] .headline, body[data-state="live"] .count { color:var(--
 .rose text { fill:var(--muted); font-family:-apple-system, "Segoe UI", Roboto, sans-serif; font-weight:700; font-size:17px; text-anchor:middle; dominant-baseline:central; }
 .rose text.n { fill:var(--accent); font-size:21px; }
 body[data-state="dark"] .rose, body[data-state="over"] .rose { opacity:.35; }
+body[data-stirring="1"] .rose { opacity:.7; }
+body[data-stirring="1"] .headline, body[data-stirring="1"] .count { color:var(--accent); }
 
 .needle { opacity:0; transition:transform .2s linear, opacity .3s; pointer-events:none; }
 body[data-needle="1"] .needle { opacity:1; }
@@ -146,6 +150,8 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
 .hints li.new { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
 
 .how { color:var(--muted); font-size:14px; margin-top:16px; text-align:center; }
+.how:empty { display:none; }
+#times { font-weight:600; }
 .setup { background:var(--warn-bg); color:var(--warn-ink); border-radius:14px; padding:12px 14px; margin-bottom:14px; font-size:14px; }
 .setup strong { display:block; margin-bottom:4px; }
 .setup ul { margin:0; padding-left:18px; }
@@ -198,6 +204,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   </section>
 
   <nav id="actions" class="actions" aria-label="Pay and chat"></nav>
+  <p id="times" class="how"></p>
   <p id="how" class="how"></p>
 </main>
 
@@ -216,6 +223,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   let mode = HUNT.direction === "exact" ? "exact" : "general";
   let warmthOn = HUNT.warmth !== false;
   const WARMUP = 45000;   // GPS starts this long before a window so the fix is ready when it opens
+  const HEADSUP = (HUNT.compass.headsUpSeconds || 120) * 1000;
   const liveText = () => LIVE < 120000 ? `${Math.round(LIVE / 1000)} seconds` : `${Math.round(LIVE / 60000)} minutes`;
   const hints = [...HUNT.hints].sort((a, b) => a.afterMinutes - b.afterMinutes);
 
@@ -325,7 +333,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     } catch (e) { wake = null; }
     wakePending = false;
   }
-  const buzz = () => { try { if (navigator.vibrate) navigator.vibrate(200); } catch (e) {} };
+  const buzz = () => { try { if (sensorsOn && navigator.vibrate) navigator.vibrate(200); } catch (e) {} };
 
   async function enable() {
     sensorsOn = true; sensorsSince = Date.now();
@@ -404,10 +412,13 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
 
     // "soon" is the warm-up before a window: GPS starts and the screen stays
     // on, so a short window isn't spent waiting for a fix.
-    const soon = (state === "dark" && p.until !== null && p.until - t < WARMUP) ||
-                 (state === "before" && START - t < WARMUP);
-    if (lastState !== null && ((state === "live" && lastState !== "live") || (soon && !lastSoon))) buzz();
-    lastState = state; lastSoon = soon;
+    const toWindow = state === "dark" && p.until !== null ? p.until - t : state === "before" ? START - t : Infinity;
+    const soon = toWindow < WARMUP;
+    // The heads-up: a coming-soon stage on screen before each window.
+    const stirring = state === "dark" && toWindow < HEADSUP;
+    document.body.dataset.stirring = stirring ? "1" : "0";
+    if (lastState !== null && ((state === "live" && lastState !== "live") || (stirring && !lastSoon))) buzz();
+    lastState = state; lastSoon = stirring;
 
     const wantAwake = sensorsOn && (state === "live" || soon);
     if (wantAwake !== lastAwake) { lastAwake = wantAwake; keepAwake(wantAwake); }
@@ -436,9 +447,12 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
       count = fmtLeft(p.until - t);
       label = "until it goes dark";
     } else if (state === "dark") {
-      headline = soon ? "The turkey is stirring" : "The turkey is hiding";
-      hub = soon ? "👀" : "💤";
-      if (p.until) { count = fmtLeft(p.until - t); label = `until the compass is back at ${fmtClock(p.until)}`; }
+      headline = stirring ? "The turkey is stirring" : "The turkey is hiding";
+      hub = stirring ? "👀" : "💤";
+      if (p.until) {
+        count = fmtLeft(p.until - t);
+        label = stirring ? `until the compass wakes for ${liveText()}. Get ready.` : `until the compass is back at ${fmtClock(p.until)}`;
+      }
       else label = "No more compass windows. It's hints only from here.";
       if (!sensorsOn && p.until) dir = `Get your compass ready now. The window only lasts ${liveText()}.`;
     } else {
@@ -493,6 +507,11 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
       diag = c + g;
     }
     $("diag").textContent = diag;
+
+    // The next few compass times, so people know when to have their phone out.
+    const times = [];
+    for (let w = t < START ? START : START + Math.ceil((t - START + 1) / CYCLE) * CYCLE; w < END && times.length < 6; w += CYCLE) times.push(fmtClock(w));
+    $("times").textContent = times.length ? `Compass wakes at ${times.join(" · ")}` : "";
 
     renderHints(t);
     drawDial();
