@@ -112,8 +112,8 @@ p { margin:0; }
 body[data-state="live"] .headline, body[data-state="live"] .count { color:var(--accent); }
 
 .dial { position:relative; width:min(300px, 78vw); aspect-ratio:1; margin:16px auto 12px; }
-.rose, .needle, .needle svg { position:absolute; inset:0; width:100%; height:100%; }
-.rose { transition:transform .2s linear, opacity .4s; }
+.dialsvg { position:absolute; inset:0; width:100%; height:100%; }
+.rose { transition:opacity .4s; }
 .rose .ring { fill:none; stroke:var(--ink); stroke-width:2; }
 .rose .ring.faint { stroke:var(--line); stroke-width:1.5; }
 .rose line { stroke:var(--muted); stroke-width:1.5; stroke-linecap:round; }
@@ -123,14 +123,14 @@ body[data-state="dark"] .rose, body[data-state="over"] .rose { opacity:.35; }
 body[data-stirring="1"] .rose { opacity:.7; }
 body[data-stirring="1"] .headline, body[data-stirring="1"] .count { color:var(--accent); }
 
-.needle { opacity:0; transition:transform .2s linear, opacity .3s; pointer-events:none; }
-body[data-needle="1"] .needle { opacity:1; }
+.needle, .bird { opacity:0; transition:opacity .3s; pointer-events:none; }
+body[data-needle="1"] .needle, body[data-needle="1"] .bird { opacity:1; }
 .needle line { stroke:var(--accent); stroke-width:5; stroke-linecap:round; }
 .needle path { fill:var(--accent); }
 .needle path.wedge { opacity:.2; }
 body[data-direction="exact"] .needle path.wedge { display:none; }
-.birdwrap { position:absolute; left:40%; top:10.67%; width:20%; height:20%; display:grid; place-items:center; }
-.bird { display:block; font-size:clamp(38px, 12.5vw, 50px); line-height:1; transition:transform .2s linear; }
+/* The turkey is moved around the dial but never rotated, so it stays sharp. */
+.bird { position:absolute; left:50%; top:50%; font-size:clamp(38px, 12.5vw, 50px); line-height:1; will-change:transform; }
 
 .hub { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; }
 .hub .dot { grid-area:1/1; width:14px; height:14px; border-radius:50%; background:var(--ink); }
@@ -202,16 +202,16 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     <p id="count" class="count"></p>
     <p id="countLabel" class="countLabel"></p>
 
-    <div class="dial" aria-hidden="true">
-      <svg id="rose" class="rose" viewBox="0 0 300 300"></svg>
-      <div id="needle" class="needle">
-        <svg viewBox="0 0 300 300">
+    <div id="dial" class="dial" aria-hidden="true">
+      <svg class="dialsvg" viewBox="0 0 300 300">
+        <g id="rose" class="rose"></g>
+        <g id="needle" class="needle">
           <path class="wedge" d="M150 150 L105.2 41.9 A117 117 0 0 1 194.8 41.9 Z"></path>
           <line x1="150" y1="150" x2="150" y2="118"></line>
           <path d="M150 94 L138 120 L162 120 Z"></path>
-        </svg>
-        <span class="birdwrap"><span id="bird" class="bird"></span></span>
-      </div>
+        </g>
+      </svg>
+      <span id="bird" class="bird"></span>
       <div class="hub"><span class="dot"></span><span id="hubIcon" class="icon"></span></div>
     </div>
 
@@ -324,7 +324,6 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     [Infinity, 1, "Ice cold. The turkey is more than two miles away."],
   ];
   const shortest = (from, to) => ((to - from + 540) % 360) - 180;
-  const turn = (current, target) => current + shortest(((current % 360) + 360) % 360, target);
 
   /* ---------- sensors ---------- */
   let sensorsOn = false, sensorsSince = 0;
@@ -344,9 +343,7 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     if (h === null) return;
     const screenAngle = (screen.orientation && typeof screen.orientation.angle === "number")
       ? screen.orientation.angle : (window.orientation || 0);
-    h = (h + screenAngle + (HUNT.declination || 0) + 720) % 360;
-    heading = heading === null ? h : (heading + shortest(heading, h) * 0.3 + 360) % 360;
-    drawDial();
+    heading = (h + screenAngle + (HUNT.declination || 0) + 720) % 360;   // the drawing loop does the smoothing
   }
 
   function startGeo() {
@@ -397,18 +394,29 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
   }
 
   /* ---------- drawing ---------- */
-  let roseRot = 0, needleRot = 0;
-  function drawDial() {
+  // The dial is redrawn on every animation frame, easing toward the latest
+  // sensor reading. Nothing here uses CSS transitions: on phones they lag
+  // behind a fast-changing compass and blur whatever is turning.
+  let shownHeading = 0, shownBearing = null, lastFrame = 0, dialSize = 0;
+  const ease = (shown, target, dt, tau) => (shown + shortest(shown, target) * (1 - Math.exp(-dt / tau)) + 360) % 360;
+  function frame(ts) {
+    const dt = Math.min(100, ts - (lastFrame || ts));
+    lastFrame = ts;
     const h = heading === null ? 0 : heading;   // no compass: north is the top of the dial
-    roseRot = turn(roseRot, (360 - h) % 360);
-    $("rose").style.transform = `rotate(${roseRot}deg)`;
+    shownHeading = ease(shownHeading, h, dt, 90);
+    $("rose").setAttribute("transform", `rotate(${(-shownHeading).toFixed(2)} 150 150)`);
     if (document.body.dataset.needle === "1" && pos) {
       let b = bearingTo(pos, HUNT.target);
       if (mode === "general") b = (Math.round(b / 45) * 45) % 360;   // snap to 8 points
-      needleRot = turn(needleRot, (b - h + 360) % 360);
-      $("needle").style.transform = `rotate(${needleRot}deg)`;
-      $("bird").style.transform = `rotate(${-needleRot}deg)`;
-    }
+      shownBearing = shownBearing === null ? b : ease(shownBearing, b, dt, 150);
+      const a = (shownBearing - shownHeading + 360) % 360;
+      $("needle").setAttribute("transform", `rotate(${a.toFixed(2)} 150 150)`);
+      // Slide the turkey to its place on the dial, on whole screen pixels, without turning it.
+      const r = dialSize * 88 / 300, dpr = window.devicePixelRatio || 1;
+      const px = v => Math.round(v * dpr) / dpr;
+      $("bird").style.transform = `translate(${px(r * Math.sin(rad(a)))}px, ${px(-r * Math.cos(rad(a)))}px) translate(-50%, -50%)`;
+    } else shownBearing = null;
+    requestAnimationFrame(frame);
   }
 
   let lastState = null, lastOpen = -1, lastSoon = false, lastAwake = false;
@@ -568,7 +576,6 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
     $("times").textContent = times.length ? `Compass wakes at ${times.join(" · ")}` : "";
 
     renderHints(t);
-    drawDial();
   }
 
   /* ---------- one-time setup ---------- */
@@ -767,8 +774,12 @@ body[data-state="dark"] .hub .dot, body[data-state="over"] .hub .dot { display:n
       render();
     }
   });
+  const measure = () => { dialSize = $("dial").clientWidth; };
+  measure();
+  window.addEventListener("resize", measure);
   render();
   setInterval(render, 500);
+  requestAnimationFrame(frame);
 })();
 </script>
 </body>
