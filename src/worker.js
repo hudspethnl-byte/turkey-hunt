@@ -68,7 +68,8 @@ function clean(input) {
 function spotIsOpen(s, now) {
   if (!s.target) return false;
   if (s.testMode) return true;
-  const start = Date.parse(s.start), end = Date.parse(s.end);
+  const start = Date.parse(s.start);
+  const end = s.end ? Date.parse(s.end) : Infinity;   // no end time: the hunt runs until the organizer ends it
   if (!(start < end) || now >= end || now < start - WARMUP_MS) return false;
   if (s.alwaysOn) return true;
   const cycle = s.everyMinutes * 60000, live = s.liveSeconds * 1000;

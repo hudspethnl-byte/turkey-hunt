@@ -25,14 +25,18 @@
     target       where the turkey is hidden: either { "lat": ..., "lon": ... }
                  or the scrambled text the organizer page saves.
                  null means "no spot yet": the compass waits.
-    start, end   when the hunt runs. The -05:00 means New York time in November.
+    start, end   when the hunt runs. end is optional: with none, the hunt
+                 runs until the organizer ends it.
     everyMinutes, liveSeconds
                  the compass wakes for liveSeconds at the top of every
                  everyMinutes, counted from the start.
     direction    "general" snaps the turkey to the nearest of 8 directions;
                  "exact" points straight at the spot.
     alwaysOn     true keeps the compass on from now until the end (the endgame).
-    testMode     true shows the organizer box. Set to false for the real hunt.
+    testMode     rehearsal mode. While true, the organizer's rehearsal link
+                 (this page with ?rehearse added) shows tools for trying a
+                 compass window, and the spot is not held back. Players on
+                 the plain address see nothing extra. Off for the real hunt.
 -->
 
 <style>
@@ -56,7 +60,10 @@ body {
 }
 main { max-width:460px; margin:0 auto; padding:20px 16px calc(28px + env(safe-area-inset-bottom)); }
 h1 { font-family:Georgia, "Times New Roman", serif; font-weight:800; font-size:30px; line-height:1.1; margin:4px 0 4px; }
+h2 { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0; }
 p { margin:0; }
+.ig { display:grid; gap:10px; }
+.ig iframe { width:100%; height:390px; border:0; border-radius:12px; background:#fff; }
 .when { color:var(--muted); font-weight:600; }
 
 .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px 16px; margin-top:14px; }
@@ -114,9 +121,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
 
 .setup { background:var(--warn-bg); color:var(--warn-ink); border-radius:14px; padding:12px 14px; margin-bottom:14px; font-size:14px; }
 .setup strong { display:block; margin-bottom:4px; }
-.setup ul { margin:0; padding-left:18px; }
-.setup ul + strong { margin-top:12px; }
-.setup .try { display:grid; gap:8px; }
+.setup .try { display:grid; gap:8px; margin-top:8px; }
 .setup input[type="number"] { width:4.2em; font:inherit; font-size:16px; padding:4px 6px; border:1px solid currentColor; border-radius:8px; background:transparent; color:inherit; text-align:center; }
 .setup select, .setup button { font:inherit; font-size:16px; font-weight:600; padding:9px 10px; border:1px solid currentColor; border-radius:10px; background:transparent; color:inherit; width:100%; text-align:center; cursor:pointer; }
 .setup p:empty { display:none; }
@@ -157,6 +162,17 @@ body[data-asleep="1"] .hub .dot { display:none; }
   </section>
 
   <p id="times" class="how"></p>
+
+  <!-- The group's Instagram, where the hints are posted. It sits in its own
+       frame, so Instagram's code cannot see this page or the phone's location. -->
+  <section id="ig" class="card ig" aria-label="Instagram" hidden>
+    <h2>Hints and updates</h2>
+    <p>Hints are posted on Instagram.</p>
+    <iframe id="igFrame" title="The hunt's Instagram profile" loading="lazy" referrerpolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+    <a id="igLink" class="btn" target="_blank" rel="noopener"></a>
+  </section>
+
   <p id="how" class="how"></p>
 </main>
 
@@ -171,9 +187,10 @@ body[data-asleep="1"] .hub .dot { display:none; }
   const $ = id => document.getElementById(id);
   const qs = new URLSearchParams(location.search);
   const ua = navigator.userAgent || "";
-  const PLACEHOLDER = { lat: 40.73082, lon: -73.99733 };   // Washington Square Arch
+  const REHEARSE = qs.has("rehearse");   // the organizer's rehearsal link; does nothing unless rehearsal mode is on
   const DEFAULTS = {
     name: "The Turkey Hunt", target: null, start: null, end: null,
+    instagram: "nycturkeyhunters",
     everyMinutes: 30, liveSeconds: 30, headsUpSeconds: 120,
     direction: "general", alwaysOn: false,
     declination: -12.5,   // phone compasses read magnetic north; this corrects to true north for New York City
@@ -205,7 +222,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
   function applyConfig(raw) {
     cfg = Object.assign({}, DEFAULTS, raw);
     START = Date.parse(cfg.start);
-    END = Date.parse(cfg.end);
+    END = cfg.end ? Date.parse(cfg.end) : Infinity;   // no end time: the hunt runs until the organizer ends it
     CYCLE = Math.max(1, parseFloat(cfg.everyMinutes) || 30) * 60000;
     LIVE = Math.max(5, parseFloat(cfg.liveSeconds) || 30) * 1000;
     HEADSUP = Math.max(0, parseFloat(cfg.headsUpSeconds) || 0) * 1000;
@@ -218,7 +235,15 @@ body[data-asleep="1"] .hub .dot { display:none; }
     $("name").textContent = cfg.name;
     $("bird").textContent = cfg.pointer;
     setHow();
-    fillChecklist($("checklist"));
+
+    const ig = String(cfg.instagram || "").replace(/^@/, "").trim();
+    $("ig").hidden = !ig;
+    if (ig) {
+      const src = `https://www.instagram.com/${encodeURIComponent(ig)}/embed/`;
+      if ($("igFrame").getAttribute("src") !== src) $("igFrame").setAttribute("src", src);
+      $("igLink").href = `https://www.instagram.com/${encodeURIComponent(ig)}/`;
+      $("igLink").textContent = `Open @${ig} on Instagram`;
+    }
   }
 
   // Where the settings come from. On the main site a small service answers at
@@ -261,7 +286,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
         const first = cfgText === null;
         cfgText = text;
         try { localStorage.setItem("turkey-config", text); } catch (e) {}
-        if (ready && !!parsed.testMode !== TEST) { location.reload(); return; }   // the organizer box appears or goes away
+        if (ready && (!!parsed.testMode && REHEARSE) !== TEST) { location.reload(); return; }   // the rehearsal tools appear or go away
         applyConfig(parsed);
         if (!first) render();
       }
@@ -311,7 +336,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const h = Math.floor(s / 3600); s -= h * 3600;
     const m = Math.floor(s / 60); s -= m * 60;
     const pad = n => String(n).padStart(2, "0");
-    if (d) return `${d}d ${h}h ${pad(m)}m`;
+    if (d) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
     if (h) return `${h}:${pad(m)}:${pad(s)}`;
     return `${m}:${pad(s)}`;
   }
@@ -460,7 +485,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
       state === "unset" ? "Time to be announced" :
       state === "before" ? `Starts ${fmtDay(START)} at ${fmtClock(START)}` :
       state === "over" ? `Ended ${fmtDay(END)} at ${fmtClock(END)}` :
-      `On now, until ${fmtClock(END)}`;
+      isFinite(END) ? `On now, until ${fmtClock(END)}` : "On now";
 
     let headline = "", count = "", label = "", dir = "", hub = "";
     const getReady = `Get your compass ready now. The window only lasts ${liveText()}.`;
@@ -480,7 +505,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
       if (!sensorsOn) dir = "Get your compass ready now so you don't miss the first window.";
     } else if (state === "live" && p.always) {
       headline = "The compass is on";
-      label = `It stays on until ${fmtClock(END)}. Go get the turkey.`;
+      label = isFinite(END) ? `It stays on until ${fmtClock(END)}. Go get the turkey.` : "It stays on until the turkey is found. Go get it.";
     } else if (state === "live") {
       headline = "The compass is live";
       count = fmtLeft(p.until - t);
@@ -624,29 +649,18 @@ body[data-asleep="1"] .hub .dot { display:none; }
       "Your location never leaves your phone.";
   }
 
-  // The organizer checklist is refilled whenever the settings change.
-  function fillChecklist(ul, testTurkey) {
-    if (!ul) return;
-    ul.textContent = "";
-    const item = text => { const li = document.createElement("li"); li.textContent = text; ul.appendChild(li); };
-    if (!(START < END)) item("The start and end times aren't set.");
-    if (testTurkey) item("A test turkey is hidden near you, on this phone only.");
-    else if (!hasSpot) item("No hiding spot is set yet.");
-    else if (target && target.lat === PLACEHOLDER.lat && target.lon === PLACEHOLDER.lon) item("The hiding spot is still a placeholder (Washington Square Arch).");
-    if (cfg.alwaysOn) item("The compass is set to always on.");
-    item("Test mode is on, so players see this box too. It goes away when testMode is false in the settings.");
-  }
-
-  // The organizer box: what is still a placeholder, plus controls for trying
-  // things out on this phone only. Shown while testMode is true in config.json.
+  // Rehearsal tools: for trying a compass window on this phone only. They show
+  // when the organizer opens the rehearsal link (?rehearse) while rehearsal
+  // mode is on. Players on the plain address never see them.
   function buildSetup() {
-    if (!TEST) return;
     const box = $("setup");
+    if (REHEARSE && !TEST) {
+      box.textContent = "Rehearsal mode is off, so the rehearsal tools are hidden. Turn it on from the organizer page to use them.";
+      box.hidden = false;
+      return;
+    }
+    if (!TEST) return;
     const add = (tag, text) => { const e = document.createElement(tag); if (text) e.textContent = text; return e; };
-
-    const ul = add("ul");
-    ul.id = "checklist";
-    fillChecklist(ul);
 
     const num = (value, min, max, apply) => {
       const i = add("input");
@@ -673,7 +687,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const jump = add("button", "Jump to 15 seconds before the next window");
     jump.type = "button";
     jump.addEventListener("click", () => {
-      if (!(START < END)) { note.textContent = "Set the start and end times first."; return; }
+      if (!(START < END)) { note.textContent = "Set the start time first."; return; }
       const t = now();
       let next = t < START ? START : START + Math.ceil((t - START + 1) / CYCLE) * CYCLE;
       if (next >= END) next = START;
@@ -693,7 +707,6 @@ body[data-asleep="1"] .hub .dot { display:none; }
           lon: here.lon + d * Math.sin(th) / (111320 * Math.cos(rad(here.lat))),
         };
         hasSpot = true;
-        fillChecklist($("checklist"), true);
         note.textContent = `Test turkey hidden about ${Math.round(d / 10) * 10} m from where you are standing, on this phone only. Jump to the next window and go find it.`;
         render();
       };
@@ -712,7 +725,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     tryBox.className = "try";
     tryBox.append(timing, sel, jump, near, note, loaded, debug,
       add("p", "These controls only change this phone, and a change to the real settings overrides them."));
-    box.append(add("strong", "Organizer checklist"), ul, add("strong", "Try it out"), tryBox);
+    box.append(add("strong", "Rehearsal tools"),
+      add("p", "Only you see this, because you opened the rehearsal link. Players never do."), tryBox);
     box.hidden = false;
   }
 
@@ -735,7 +749,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
       render();
       await new Promise(r => setTimeout(r, 5000));
     }
-    TEST = !!cfg.testMode;
+    TEST = !!cfg.testMode && REHEARSE;
     readOverrides();
     ready = true;
     buildInApp();

@@ -56,6 +56,12 @@ p { margin:0; }
   line-height:1.2; text-align:center; text-decoration:none; cursor:pointer;
 }
 .btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+/* In a pair of choices, the filled one with a tick is the one in force now. */
+.btn.on { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+.btn.on::before { content:"✓  "; }
+.seg { display:grid; gap:8px; }
+.todo { margin:0; padding-left:20px; }
+.todo li { margin:4px 0; }
 .btn:disabled { opacity:.5; }
 label { display:grid; gap:4px; font-weight:600; }
 label.row { display:flex; gap:10px; align-items:center; font-weight:400; }
@@ -93,9 +99,19 @@ a { color:var(--accent); }
 
   <div id="panel" hidden>
     <section class="card">
+      <h2>Before the hunt</h2>
+      <ul id="todo" class="todo"></ul>
+    </section>
+
+    <section class="card">
       <h2>Mid-hunt</h2>
-      <button id="endgame" class="btn primary" type="button">Endgame: compass on, pointing straight at it</button>
-      <button id="normal" class="btn" type="button">Back to short windows, general direction</button>
+      <p id="modeNow" class="small"></p>
+      <div class="seg" role="group" aria-label="Compass mode">
+        <button id="normal" class="btn" type="button" aria-pressed="false">Short windows, general direction</button>
+        <button id="endgame" class="btn" type="button" aria-pressed="false">Endgame: always on, pointing straight at it</button>
+      </div>
+      <p id="endNow" class="small"></p>
+      <button id="endHunt" class="btn" type="button" hidden>End the hunt now</button>
     </section>
 
     <section class="card">
@@ -112,10 +128,8 @@ a { color:var(--accent); }
 
     <section class="card">
       <h2>When</h2>
-      <div class="pair">
-        <label>Starts <input id="start" type="datetime-local"></label>
-        <label>Ends <input id="end" type="datetime-local"></label>
-      </div>
+      <label>Starts <input id="start" type="datetime-local"></label>
+      <p class="small">There is no end time to set. Once it starts, the hunt runs until you end it under Mid-hunt.</p>
     </section>
 
     <section class="card">
@@ -131,7 +145,8 @@ a { color:var(--accent); }
         </select>
       </label>
       <label class="row"><input id="alwaysOn" type="checkbox"> Compass always on until the end</label>
-      <label class="row"><input id="testMode" type="checkbox"> Test mode (players see the organizer box)</label>
+      <label class="row"><input id="testMode" type="checkbox"> Rehearsal mode (turn off before the real hunt)</label>
+      <p class="small"><a href="./?rehearse=1">Rehearse on this phone</a>: opens the players' page with tools to jump to a compass window. It only works while rehearsal mode is on and saved. Players never see those tools.</p>
     </section>
 
     <section class="card">
@@ -302,16 +317,59 @@ a { color:var(--accent); }
     showSpot();
     $("coords").value = "";
     $("start").value = s.start ? toInput(s.start) : "";
-    $("end").value = s.end ? toInput(s.end) : "";
     $("liveSeconds").value = s.liveSeconds;
     $("everyMinutes").value = s.everyMinutes;
     $("direction").value = s.direction === "exact" ? "exact" : "general";
     $("alwaysOn").checked = !!s.alwaysOn;
     $("testMode").checked = !!s.testMode;
     $("status").textContent =
-      (s.start && s.end ? `${clock(s.start)} to ${clock(s.end)}` : "No times set") +
+      (s.start ? `Starts ${clock(s.start)}` : "No start time") +
       ` · ${s.alwaysOn ? "compass always on" : `${s.liveSeconds} s every ${s.everyMinutes} min`}` +
       ` · ${s.direction === "exact" ? "exact" : "general"} · ${spot ? "spot set" : "no spot yet"}`;
+
+    // Before the hunt: what still needs doing.
+    const todo = [];
+    if (!s.start) todo.push("Set the start time.");
+    if (!spot) todo.push("Set the hiding spot. This can wait until the day.");
+    else if (spot.lat === 40.73082 && spot.lon === -73.99733) todo.push("The hiding spot is still the placeholder (Washington Square Arch).");
+    if (s.end && Date.parse(s.end) > Date.now()) todo.push(`An end time is saved (${clock(s.end)}). Clear it under Mid-hunt unless the hunt should stop then.`);
+    if (s.testMode) todo.push("Rehearsal mode is on. Turn it off under Compass before the real hunt.");
+    if (!todo.length) todo.push("All set.");
+    $("todo").textContent = "";
+    todo.forEach(text => { const li = document.createElement("li"); li.textContent = text; $("todo").appendChild(li); });
+
+    // Mid-hunt: the filled, ticked button is the mode in force now.
+    const endgame = !!s.alwaysOn && s.direction === "exact";
+    const normal = !s.alwaysOn && s.direction !== "exact";
+    $("endgame").classList.toggle("on", endgame); $("endgame").setAttribute("aria-pressed", String(endgame));
+    $("normal").classList.toggle("on", normal); $("normal").setAttribute("aria-pressed", String(normal));
+    $("modeNow").textContent =
+      endgame ? "Now: endgame. The compass is on for everyone and points straight at the spot." :
+      normal ? `Now: short windows. ${s.liveSeconds} seconds every ${s.everyMinutes} minutes, general direction.` :
+      "Now: a custom mix, set under Compass below.";
+    fillEnd();
+  }
+
+  // Ending the hunt. This depends on the clock, so it is refreshed on a timer too.
+  function fillEnd() {
+    if (!saved) return;
+    const startMs = Date.parse(saved.start), endMs = saved.end ? Date.parse(saved.end) : NaN, nowMs = Date.now();
+    const btn = $("endHunt");
+    if (!isNaN(endMs)) {
+      const over = endMs <= nowMs;
+      $("endNow").textContent = over ? `The hunt ended ${clock(saved.end)}.` : `The hunt is set to end ${clock(saved.end)}.`;
+      btn.textContent = over ? "Reopen the hunt" : "Clear the end time";
+      btn.dataset.act = "clear";
+      btn.hidden = false;
+    } else if (!isNaN(startMs) && nowMs >= startMs) {
+      $("endNow").textContent = "The hunt is running. It keeps going until you end it.";
+      btn.textContent = "End the hunt now";
+      btn.dataset.act = "end";
+      btn.hidden = false;
+    } else {
+      $("endNow").textContent = "";
+      btn.hidden = true;
+    }
   }
 
   function collect() {
@@ -319,8 +377,7 @@ a { color:var(--accent); }
     const rounded = spot ? { lat: +spot.lat.toFixed(6), lon: +spot.lon.toFixed(6) } : null;
     // The service keeps the spot to itself; the settings file is public, so there it is scrambled.
     s.target = !rounded ? null : mode === "api" ? rounded : scramble(rounded);
-    s.start = fromInput($("start").value);
-    s.end = fromInput($("end").value);
+    s.start = fromInput($("start").value);   // the end time is left as saved; the End button changes it
     s.liveSeconds = Math.min(900, Math.max(5, Math.round(parseFloat($("liveSeconds").value) || 30)));
     s.everyMinutes = Math.min(180, Math.max(1, Math.round(parseFloat($("everyMinutes").value) || 30)));
     s.direction = $("direction").value;
@@ -331,7 +388,7 @@ a { color:var(--accent); }
 
   async function send(settings, message) {
     if (settings.start && settings.end && Date.parse(settings.end) <= Date.parse(settings.start)) {
-      say("saveMsg", "The end has to be after the start.", "bad");
+      say("saveMsg", "The saved end time is before that start. Tap \"Clear the end time\" (or \"Reopen the hunt\") under Mid-hunt first.", "bad");
       return;
     }
     $("save").disabled = true;
@@ -399,15 +456,29 @@ a { color:var(--accent); }
   $("noSpot").addEventListener("click", () => { spot = null; showSpot("No spot yet. Save to send that to phones."); });
   $("save").addEventListener("click", () => send(collect(), "Update hunt settings"));
   $("endgame").addEventListener("click", () => {
-    if (!confirm("Turn the compass on for everyone until the end, pointing straight at the spot?")) return;
+    if ($("endgame").classList.contains("on")) { say("saveMsg", "Endgame is already on."); return; }
+    if (!confirm("Turn the compass on for everyone until the hunt ends, pointing straight at the spot?")) return;
     const s = collect(); s.alwaysOn = true; s.direction = "exact";
     send(s, "Endgame: compass always on, exact direction");
   });
   $("normal").addEventListener("click", () => {
+    if ($("normal").classList.contains("on")) { say("saveMsg", "Short windows are already on."); return; }
     if (!confirm("Go back to short compass windows with a general direction?")) return;
     const s = collect(); s.alwaysOn = false; s.direction = "general";
     send(s, "Back to short windows, general direction");
   });
+  $("endHunt").addEventListener("click", () => {
+    const s = collect();
+    if ($("endHunt").dataset.act === "end") {
+      if (!confirm("End the hunt for everyone now?")) return;
+      s.end = new Date().toISOString();
+      send(s, "End the hunt");
+    } else {
+      s.end = null;
+      send(s, "Clear the end time");
+    }
+  });
+  setInterval(fillEnd, 20000);
 
   // Which site is this? The main site answers at api/state; the fallback site does not.
   async function begin() {
