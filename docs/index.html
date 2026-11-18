@@ -163,6 +163,11 @@ body[data-asleep="1"] .hub .dot { display:none; }
 <script>
 (() => {
   "use strict";
+  // Phones only share location and the compass over https, so never stay on plain http.
+  if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    location.replace("https://" + location.host + location.pathname + location.search);
+    return;
+  }
   const $ = id => document.getElementById(id);
   const qs = new URLSearchParams(location.search);
   const ua = navigator.userAgent || "";

@@ -150,6 +150,11 @@ a { color:var(--accent); }
 <script>
 (() => {
   "use strict";
+  // The passcode and the phone's location should only ever travel over https.
+  if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    location.replace("https://" + location.host + location.pathname + location.search);
+    return;
+  }
   const REPO = "hudspethnl-byte/turkey-hunt";
   const API = `https://api.github.com/repos/${REPO}/contents/docs/config.json`;
   // Saves show up in the public repo's history under this name, not a personal email.
