@@ -1,0 +1,20 @@
+// Cloudflare's settings for the Turkey Hunt.
+// The pages in ./docs are served as they are; anything under /api/ goes to
+// src/worker.js, which keeps the hunt's settings in one small store ("Hunt").
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "turkey-hunt",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./docs",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "HUNT", "class_name": "Hunt" }]
+  },
+  "exports": {
+    "Hunt": { "type": "durable-object", "storage": "sqlite" }
+  }
+}

@@ -10,10 +10,17 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🦃%3C/text%3E%3C/svg%3E">
 
 <!--
-  THE HUNT'S SETTINGS LIVE IN config.json, NEXT TO THIS FILE.
+  WHERE THE HUNT'S SETTINGS LIVE.
 
-  This page re-reads config.json every 30 seconds, so a change there reaches
-  every phone without anyone reloading. The settings:
+  On the main site a small service (src/worker.js) holds them and this page
+  asks it every 15 seconds. The hiding spot is only handed over while the
+  compass is live.
+
+  On the fallback site there is no service, so this page re-reads the
+  settings file, config.json, every 30 seconds instead.
+
+  Either way a change reaches every phone without anyone reloading. The
+  settings:
 
     target       where the turkey is hidden: either { "lat": ..., "lon": ... }
                  or the scrambled text the organizer page saves.
@@ -172,7 +179,11 @@ body[data-asleep="1"] .hub .dot { display:none; }
 
   /* ---------- settings ---------- */
   let cfg = Object.assign({}, DEFAULTS), cfgText = null, cfgLoadedAt = 0, ready = false, TEST = false;
-  let START = NaN, END = NaN, CYCLE = 1800000, LIVE = 30000, HEADSUP = 120000, mode = "general", target = null;
+  let START = NaN, END = NaN, CYCLE = 1800000, LIVE = 30000, HEADSUP = 120000, mode = "general";
+  let target = null;      // the spot, when this phone has been given it
+  let hasSpot = false;    // whether a spot exists at all (the service only sends it while the compass is live)
+  let source = null;      // "api" = the instant service, "file" = config.json on the fallback site
+  let serverOffset = 0;   // with the service, every phone runs on the server's clock
 
   // The organizer page saves the spot scrambled, so it can't be read at a
   // glance in the settings file. This is a deterrent, not a lock.
@@ -197,6 +208,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const tg = typeof cfg.target === "string" ? unscramble(cfg.target) : cfg.target;
     const lat = tg ? parseFloat(tg.lat) : NaN, lon = tg ? parseFloat(tg.lon) : NaN;
     target = isFinite(lat) && isFinite(lon) ? { lat, lon } : null;
+    hasSpot = "hasSpot" in raw ? !!raw.hasSpot : !!target;
     document.title = cfg.name;
     $("name").textContent = cfg.name;
     $("bird").textContent = cfg.pointer;
@@ -204,13 +216,38 @@ body[data-asleep="1"] .hub .dot { display:none; }
     fillChecklist($("checklist"));
   }
 
-  // Fetch config.json. A change is applied on the spot; the page never needs a reload.
+  // Where the settings come from. On the main site a small service answers at
+  // api/state: changes arrive within seconds, and the hiding spot is only sent
+  // while the compass is live. The fallback site has no such service, so there
+  // the page reads the settings file (config.json) instead.
+  async function fetchSettings() {
+    if (source !== "file") {
+      try {
+        const res = await fetch(`api/state?t=${Date.now()}`, { cache: "no-store" });
+        const state = res.ok ? await res.json().catch(() => null) : null;
+        if (state && typeof state.now === "number") {
+          source = "api";
+          serverOffset = state.now - Date.now();
+          delete state.now;
+          return state;
+        }
+        if (source === null && (res.ok || res.status === 404)) source = "file";   // this site has no service
+      } catch (e) { /* no connection */ }
+      if (source !== "file") return null;
+    }
+    const res = await fetch(`config.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+  let nudgedAt = 0;
+  const nudge = () => { if (Date.now() - nudgedAt > 2000) { nudgedAt = Date.now(); loadConfig(); } };
+
+  // Read the settings. A change is applied on the spot; the page never needs a reload.
   async function loadConfig() {
     try {
-      const res = await fetch(`config.json?t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const text = await res.text();
-      const parsed = JSON.parse(text);
+      const parsed = await fetchSettings();
+      if (!parsed) return false;
+      const text = JSON.stringify(parsed);
       cfgLoadedAt = Date.now();
       if (text !== cfgText) {
         const first = cfgText === null;
@@ -225,7 +262,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
   }
 
   /* ---------- test-mode overrides (ignored when testMode is false) ---------- */
-  let clockOffset = 0, fakePos = null, fakeHeading = null;
+  let clockOffset = null, fakePos = null, fakeHeading = null;
   function readOverrides() {
     if (!TEST) return;
     const n = Date.parse(qs.get("now") || "");
@@ -236,7 +273,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     if (isFinite(h)) fakeHeading = ((h % 360) + 360) % 360;
     if (qs.get("inapp")) inApp = qs.get("inapp");   // ?inapp=Instagram shows the prompt
   }
-  const now = () => Date.now() + clockOffset;
+  const now = () => Date.now() + (clockOffset !== null ? clockOffset : serverOffset);
 
   /* ---------- in-app browsers (a link tapped inside Instagram and similar) ---------- */
   const inAppHit = /Instagram|FBAN|FBAV|FB_IAB|Barcelona|Snapchat|TikTok|musical_ly|Bytedance|LinkedInApp/i.exec(ua);
@@ -249,7 +286,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     if (!(START < END)) return { state: "unset", until: null };
     if (t < START) return { state: "before", until: START };
     if (t >= END) return { state: "over", until: null };
-    if (!target) return { state: "nospot", until: null };
+    if (!hasSpot) return { state: "nospot", until: null };
     if (cfg.alwaysOn) return { state: "live", until: END, always: true };
     const into = (t - START) % CYCLE;
     if (into < LIVE) return { state: "live", until: Math.min(t - into + LIVE, END) };
@@ -454,10 +491,14 @@ body[data-asleep="1"] .hub .dot { display:none; }
       hub = cfg.pointer;
     }
 
+    // The service hands over the spot just before each window; ask as soon as it is due.
+    if (source === "api" && hasSpot && !target && (soon || state === "live")) nudge();
+
     let showNeedle = false;
     if (state === "live" && sensorsOn) {
       if (geoError === "denied") dir = "Location is blocked for this page. Allow it in your browser settings, then reload.";
       else if (geoError === "unsupported") dir = "This browser can't share location. Open the link in Safari or Chrome.";
+      else if (!target) dir = "Finding the turkey…";
       else if (!fresh) dir = "Finding you…";
       else {
         showNeedle = true;
@@ -497,7 +538,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
 
     // Organizer-only: what this phone reported, and when the settings were last read.
     if (TEST && $("debug")) {
-      $("loaded").textContent = `Settings last read at ${new Date(cfgLoadedAt).toLocaleTimeString()} (re-read every ${POLL / 1000} seconds).`;
+      $("loaded").textContent = `Settings last read at ${new Date(cfgLoadedAt).toLocaleTimeString()}, from ${source === "api" ? "the instant service (every 15 seconds)" : "the settings file (every 30 seconds)"}.`;
       $("debug").textContent = !sensorsOn ? "" :
         `Compass debug: permission ${permResult}; ${evCount} motion events, ${evWebkit} with an iPhone heading, ${evAbs} marked absolute; ` +
         `${looksDesktop ? "looks like a computer" : "looks like a phone"}${inApp ? `, inside ${inApp}` : ""}.`;
@@ -582,8 +623,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const item = text => { const li = document.createElement("li"); li.textContent = text; ul.appendChild(li); };
     if (!(START < END)) item("The start and end times aren't set.");
     if (testTurkey) item("A test turkey is hidden near you, on this phone only.");
-    else if (!target) item("No hiding spot is set yet.");
-    else if (target.lat === PLACEHOLDER.lat && target.lon === PLACEHOLDER.lon) item("The hiding spot is still a placeholder (Washington Square Arch).");
+    else if (!hasSpot) item("No hiding spot is set yet.");
+    else if (target && target.lat === PLACEHOLDER.lat && target.lon === PLACEHOLDER.lon) item("The hiding spot is still a placeholder (Washington Square Arch).");
     if (cfg.alwaysOn) item("The compass is set to always on.");
     item("Test mode is on, so players see this box too. It goes away when testMode is false in the settings.");
   }
@@ -643,6 +684,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
           lat: here.lat + d * Math.cos(th) / 111320,
           lon: here.lon + d * Math.sin(th) / (111320 * Math.cos(rad(here.lat))),
         };
+        hasSpot = true;
         fillChecklist($("checklist"), true);
         note.textContent = `Test turkey hidden about ${Math.round(d / 10) * 10} m from where you are standing, on this phone only. Jump to the next window and go find it.`;
         render();
@@ -700,7 +742,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     });
     render();
     setInterval(render, 500);
-    setInterval(loadConfig, POLL);
+    const again = async () => { await loadConfig(); setTimeout(again, source === "api" ? 15000 : POLL); };
+    setTimeout(again, source === "api" ? 15000 : POLL);
   }
   boot();
 })();

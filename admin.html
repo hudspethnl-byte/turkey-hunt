@@ -10,13 +10,19 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🦃%3C/text%3E%3C/svg%3E">
 
 <!--
-  THE ORGANIZER'S PAGE.
+  THE ORGANIZER'S PAGE. It works in one of two ways, depending on the site
+  it is opened from:
 
-  It changes the hunt's settings (config.json) by saving a new copy to the
-  GitHub repo, using a key the organizer pastes in once. The key stays on
-  that phone and is only ever sent to api.github.com. Players' phones pick
-  up a change once GitHub has republished the site, usually within a
-  minute or two.
+  - On the main site, it talks to the hunt's small service (src/worker.js)
+    using a passcode. Changes reach phones within about 15 seconds, and the
+    hiding spot stays on the server.
+
+  - On the fallback site (GitHub), there is no service. It saves a new copy
+    of the settings file (config.json) to the GitHub repo, using a GitHub
+    key that is only ever sent to api.github.com. Phones pick up a change
+    once GitHub has republished the site, usually within a minute or two.
+
+  Either way the passcode or key is typed in once and stays on that phone.
 -->
 
 <style>
@@ -78,8 +84,8 @@ a { color:var(--accent); }
 
   <!-- First visit on a phone: paste the key once. -->
   <section id="keyCard" class="card" hidden>
-    <h2>Organizer key</h2>
-    <p>Paste the key you were sent. It stays on this phone.</p>
+    <h2 id="keyTitle">Organizer passcode</h2>
+    <p id="keyHelp">Type the passcode you were given. It stays on this phone.</p>
     <input id="keyInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Organizer key">
     <button id="unlock" class="btn primary" type="button">Unlock</button>
     <p id="keyMsg" class="msg"></p>
@@ -131,7 +137,7 @@ a { color:var(--accent); }
     <section class="card">
       <button id="save" class="btn primary" type="button">Save and send to phones</button>
       <p id="saveMsg" class="msg"></p>
-      <p class="small">Phones pick up a change on their own, usually within a minute or two. Nobody has to reload.</p>
+      <p id="speedNote" class="small"></p>
     </section>
 
     <p class="small" style="margin-top:16px; text-align:center;">
@@ -145,16 +151,16 @@ a { color:var(--accent); }
 (() => {
   "use strict";
   const REPO = "hudspethnl-byte/turkey-hunt";
-  const API = `https://api.github.com/repos/${REPO}/contents/config.json`;
+  const API = `https://api.github.com/repos/${REPO}/contents/docs/config.json`;
   // Saves show up in the public repo's history under this name, not a personal email.
   const COMMITTER = { name: "Turkey Hunt organizer", email: "281390078+hudspethnl-byte@users.noreply.github.com" };
-  const KEY_STORE = "turkey-admin-key";
   const SCRAMBLE = "gobble-gobble-2026";
   const $ = id => document.getElementById(id);
 
-  let key = "";
-  try { key = localStorage.getItem(KEY_STORE) || ""; } catch (e) {}
-  let saved = null;   // the settings as GitHub has them
+  let mode = null;    // "api" = the instant service on the main site, "github" = the fallback site
+  const keyStore = () => mode === "api" ? "turkey-admin-pass" : "turkey-admin-key";
+  let key = "";       // the passcode (main site) or the GitHub key (fallback site)
+  let saved = null;   // the settings as the server has them
   let sha = null;     // GitHub's version tag for the settings file
   let spot = null;    // { lat, lon } being edited, or null for "no spot yet"
 
@@ -191,21 +197,45 @@ a { color:var(--accent); }
     if (!res.ok) { const e = new Error("GitHub answered " + res.status); e.status = res.status; throw e; }
     return res.json();
   }
+  // The instant service on the main site.
+  async function api(method, body) {
+    const res = await fetch("api/admin", {
+      method, cache: "no-store",
+      headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) { const e = new Error("The server answered " + res.status); e.status = res.status; throw e; }
+    return res.json();
+  }
+
   const explain = e =>
+    !e.status ? "No connection. Check your signal and try again." :
+    mode === "api" ? (
+      e.status === 401 ? "Wrong passcode." :
+      e.status === 503 ? "The server has no organizer passcode set yet." :
+      `The server answered ${e.status}. Try again in a moment.`) :
     e.status === 401 ? "That key was refused. It may be mistyped or expired." :
     e.status === 403 || e.status === 404 ? "That key can't change this hunt's settings." :
-    e.status ? `GitHub answered ${e.status}. Try again in a moment.` :
-    "No connection. Check your signal and try again.";
+    `GitHub answered ${e.status}. Try again in a moment.`;
 
   async function load() {
-    const data = await gh("GET");
-    sha = data.sha;
-    saved = JSON.parse(b64decode(data.content));
+    if (mode === "api") saved = await api("GET");
+    else {
+      const data = await gh("GET");
+      sha = data.sha;
+      saved = JSON.parse(b64decode(data.content));
+    }
     fill(saved);
   }
 
   async function save(settings, message) {
     say("saveMsg", "Saving…");
+    if (mode === "api") {
+      saved = await api("POST", settings);
+      fill(saved);
+      say("saveMsg", `Saved at ${new Date().toLocaleTimeString()}. Phones pick it up within about 15 seconds.`, "ok");
+      return;
+    }
     const body = () => ({ message, content: b64encode(JSON.stringify(settings, null, 2) + "\n"), sha, committer: COMMITTER });
     let out;
     try { out = await gh("PUT", body()); }
@@ -281,7 +311,9 @@ a { color:var(--accent); }
 
   function collect() {
     const s = Object.assign({}, saved);
-    s.target = spot ? scramble({ lat: +spot.lat.toFixed(6), lon: +spot.lon.toFixed(6) }) : null;
+    const rounded = spot ? { lat: +spot.lat.toFixed(6), lon: +spot.lon.toFixed(6) } : null;
+    // The service keeps the spot to itself; the settings file is public, so there it is scrambled.
+    s.target = !rounded ? null : mode === "api" ? rounded : scramble(rounded);
     s.start = fromInput($("start").value);
     s.end = fromInput($("end").value);
     s.liveSeconds = Math.min(900, Math.max(5, Math.round(parseFloat($("liveSeconds").value) || 30)));
@@ -339,22 +371,23 @@ a { color:var(--accent); }
     $("status").textContent = "Loading the settings…";
     try {
       await load();
-      try { localStorage.setItem(KEY_STORE, key); } catch (e) {}
+      try { localStorage.setItem(keyStore(), key); } catch (e) {}
       $("panel").hidden = false;
     } catch (e) {
       $("keyCard").hidden = false;
-      $("status").textContent = "Paste your key to start.";
+      $("status").textContent = startLine();
       say("keyMsg", explain(e), "bad");
     }
   }
+  const startLine = () => mode === "api" ? "Type your passcode to start." : "Paste your key to start.";
 
-  $("unlock").addEventListener("click", () => { key = $("keyInput").value.trim(); $("keyInput").value = ""; if (key) open(); });
+  $("unlock").addEventListener("click", () => { key = $("keyInput").value.trim(); $("keyInput").value = ""; if (key && mode) open(); });
   $("forget").addEventListener("click", () => {
-    try { localStorage.removeItem(KEY_STORE); } catch (e) {}
+    try { localStorage.removeItem(keyStore()); } catch (e) {}
     key = ""; saved = null;
     $("panel").hidden = true; $("keyCard").hidden = false;
-    $("status").textContent = "Paste your key to start.";
-    say("keyMsg", "Key forgotten on this phone.");
+    $("status").textContent = startLine();
+    say("keyMsg", "Forgotten on this phone.");
   });
   $("here").addEventListener("click", locate);
   $("coords").addEventListener("input", pasted);
@@ -371,7 +404,29 @@ a { color:var(--accent); }
     send(s, "Back to short windows, general direction");
   });
 
-  if (key) open(); else $("keyCard").hidden = false;
+  // Which site is this? The main site answers at api/state; the fallback site does not.
+  async function begin() {
+    $("status").textContent = "Connecting…";
+    try {
+      const res = await fetch(`api/state?t=${Date.now()}`, { cache: "no-store" });
+      const state = res.ok ? await res.json().catch(() => null) : null;
+      mode = state && typeof state.now === "number" ? "api" : "github";
+    } catch (e) {
+      $("status").textContent = "No connection. Check your signal, then reload this page.";
+      return;
+    }
+    if (mode === "github") {
+      $("keyTitle").textContent = "Organizer key";
+      $("keyHelp").textContent = "Paste the GitHub key you were sent. It stays on this phone.";
+    }
+    $("speedNote").textContent = mode === "api"
+      ? "Phones pick up a change on their own within about 15 seconds. Nobody has to reload."
+      : "This is the fallback site. Phones pick up a change on their own, usually within a minute or two.";
+    try { key = localStorage.getItem(keyStore()) || ""; } catch (e) {}
+    $("status").textContent = startLine();
+    if (key) open(); else $("keyCard").hidden = false;
+  }
+  begin();
 })();
 </script>
 </body>
