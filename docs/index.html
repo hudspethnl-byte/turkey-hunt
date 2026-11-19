@@ -672,7 +672,9 @@ body[data-asleep="1"] .hub .dot { display:none; }
       if (state === "before" || state === "live") {
         g = geoError === "denied" ? " Location blocked."
           : geoError === "unsupported" ? " No location in this browser."
-          : pos ? ` GPS within ${Math.round(pos.acc)} m.${pos.acc > 100 ? " That's fuzzy. Step into the open." : ""}`
+          : pos ? (pos.acc > 100
+              ? ` Your location is only accurate to about ${Math.round(pos.acc)} m. Step into the open.`
+              : ` Your location is accurate to about ${Math.round(pos.acc)} m.`)
           : " Waiting for GPS…";
       }
       diag = c + g;
