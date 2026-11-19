@@ -5,7 +5,8 @@
 //   2. Holds the hunt's settings, the hiding spot and the hints, and answers:
 //        GET  /api/state      anyone      the settings a player's phone needs,
 //                                         plus the hints posted so far.
-//                                         The spot is never included.
+//                                         The spot is never included, only
+//                                         whether one is saved and when.
 //        POST /api/direction  anyone      "I am at this position: which way is
 //                                         the turkey?" Answered only while the
 //                                         compass is live. The reply is a
@@ -28,6 +29,7 @@ import { DurableObject } from "cloudflare:workers";
 const DEFAULTS = {
   name: "The Turkey Hunt",
   target: null,          // { lat, lon } or null for "no spot yet"
+  spotAt: null,          // when the spot was saved (set here, never by the organizer page)
   start: null,
   end: null,             // null: the hunt runs until the organizer ends it
   everyMinutes: 30,
@@ -47,6 +49,11 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 const rad = d => d * Math.PI / 180;
 
 // Is the compass answering right now?
+//
+// The compass clock starts when the spot is saved: the first window opens one
+// full gap (everyMinutes) after that, and never before the hunt's start. From
+// then on there is a window every everyMinutes. Settings saved before this
+// rule existed have no spotAt, and count from the start as they always did.
 function compassIsOpen(s, now) {
   if (!s.target) return false;
   if (s.testMode) return true;
@@ -55,8 +62,10 @@ function compassIsOpen(s, now) {
   if (!(start < end) || now >= end || now < start - GRACE_MS) return false;
   if (s.alwaysOn) return true;
   const cycle = s.everyMinutes * 60000, live = s.liveSeconds * 1000;
-  const into = (((now - start) % cycle) + cycle) % cycle;      // time since the last window opened
-  if (now >= start && into < live) return true;                // a window is open
+  const first = Number.isFinite(s.spotAt) ? Math.max(start, s.spotAt + cycle) : start;
+  if (now < first - GRACE_MS) return false;                    // the first window hasn't come round yet
+  const into = (((now - first) % cycle) + cycle) % cycle;      // time since the last window opened
+  if (now >= first && into < live) return true;                // a window is open
   const nextOpens = now - into + cycle;
   return nextOpens < end && nextOpens - now <= GRACE_MS;       // about to open
 }
@@ -137,7 +146,11 @@ export class Hunt extends DurableObject {
 
   async write(changes) {
     const current = await this.read();
-    const next = Object.assign({}, current, changes, { v: (current.v || 0) + 1, updated: Date.now() });
+    const now = Date.now();
+    const next = Object.assign({}, current, changes, { v: (current.v || 0) + 1, updated: now });
+    // The compass clock: stamped when a spot is saved where there was none,
+    // kept when the spot is moved, cleared when the spot is taken away.
+    next.spotAt = !next.target ? null : current.target ? (current.spotAt ?? null) : now;
     await this.ctx.storage.put("settings", next);
     return next;
   }

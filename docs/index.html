@@ -30,8 +30,11 @@
     start, end   when the hunt runs. end is optional: with none, the hunt
                  runs until the organizer ends it.
     everyMinutes, liveSeconds
-                 the compass wakes for liveSeconds at the top of every
-                 everyMinutes, counted from the start.
+                 the compass wakes for liveSeconds once every everyMinutes.
+    spotAt       when the spot was saved. The compass clock starts there:
+                 the first window opens one everyMinutes later (never before
+                 the start), then one every everyMinutes. Missing or null:
+                 the windows count from the start instead.
     direction    "general" snaps the turkey to the nearest of 8 directions;
                  "exact" points straight at the spot.
     alwaysOn     true keeps the compass on from now until the end (the endgame).
@@ -228,6 +231,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
   let START = NaN, END = NaN, CYCLE = 1800000, LIVE = 30000, HEADSUP = 120000, mode = "general";
   let target = null;      // the spot, when this phone has been given it
   let hasSpot = false;    // whether a spot exists at all (the service only sends it while the compass is live)
+  let SPOT_AT = NaN;      // when the spot was saved: the compass clock starts there
   let source = null;      // "api" = the instant service, "file" = config.json on the fallback site
   let serverOffset = 0;   // with the service, every phone runs on the server's clock
 
@@ -255,6 +259,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const lat = tg ? parseFloat(tg.lat) : NaN, lon = tg ? parseFloat(tg.lon) : NaN;
     target = isFinite(lat) && isFinite(lon) ? { lat, lon } : null;
     hasSpot = "hasSpot" in raw ? !!raw.hasSpot : !!target;
+    SPOT_AT = typeof cfg.spotAt === "number" ? cfg.spotAt : NaN;
     document.title = cfg.name;
     $("name").textContent = cfg.name;
     $("bird").textContent = cfg.pointer;
@@ -423,13 +428,22 @@ body[data-asleep="1"] .hub .dot { display:none; }
   const looksDesktop = !(navigator.maxTouchPoints > 0) && !/Android|iPhone|iPad|iPod/i.test(ua);
 
   /* ---------- schedule ---------- */
+  // The first compass window. The clock starts when the spot is saved: the
+  // first window opens one full gap after that, and never before the start.
+  // With no saved time to go on, the windows count from the start.
+  const firstWindow = () => SPOT_AT > 0 ? Math.max(START, SPOT_AT + CYCLE) : START;
+  // The next window to open after time t.
+  const nextWindow = t => { const f = firstWindow(); return t < f ? f : f + Math.ceil((t - f + 1) / CYCLE) * CYCLE; };
+
   function phase(t) {
     if (!(START < END)) return { state: "unset", until: null };
     if (t < START) return { state: "before", until: START };
     if (t >= END) return { state: "over", until: null };
     if (!hasSpot) return { state: "nospot", until: null };
     if (cfg.alwaysOn) return { state: "live", until: END, always: true };
-    const into = (t - START) % CYCLE;
+    const first = firstWindow();
+    if (t < first) return { state: "dark", until: first < END ? first : null, first: true };
+    const into = (t - first) % CYCLE;
     if (into < LIVE) return { state: "live", until: Math.min(t - into + LIVE, END) };
     const next = t - into + CYCLE;
     return { state: "dark", until: next < END ? next : null };
@@ -449,6 +463,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
     return `${m}:${pad(s)}`;
   }
   const liveText = () => LIVE < 120000 ? `${Math.round(LIVE / 1000)} seconds` : `${Math.round(LIVE / 60000)} minutes`;
+  const gapText = () => { const m = Math.round(CYCLE / 60000); return m === 1 ? "1 minute" : `${m} minutes`; };
 
   /* ---------- geometry ---------- */
   const rad = d => d * Math.PI / 180;
@@ -574,7 +589,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     // The heads-up: a coming-soon stage on screen before each window.
     const stirring = state === "dark" && toWindow < HEADSUP;
     document.body.dataset.stirring = stirring ? "1" : "0";
-    if (lastState !== null && ((state === "live" && lastState !== "live") || (stirring && !lastStirring))) buzz();
+    if (lastState !== null && ((state === "live" && lastState !== "live") || (stirring && !lastStirring) ||
+        (state === "dark" && lastState === "nospot"))) buzz();
     lastState = state; lastStirring = stirring;
 
     const wantAwake = sensorsOn && (state === "live" || soon);
@@ -607,7 +623,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
       if (sensorsOn && pos && heading !== null) dir = "You're set. The red N is north.";
     } else if (state === "nospot") {
       headline = "The turkey is on the loose";
-      label = "It hasn't picked a hiding spot yet. The compass wakes up once it does.";
+      label = `It hasn't picked a hiding spot yet. The compass first wakes ${gapText()} after it does.`;
       hub = "🏃";
       if (!sensorsOn) dir = "Get your compass ready now so you don't miss the first window.";
     } else if (state === "live" && p.always) {
@@ -618,11 +634,13 @@ body[data-asleep="1"] .hub .dot { display:none; }
       count = fmtLeft(p.until - t);
       label = "until it goes dark";
     } else if (state === "dark") {
-      headline = stirring ? "The turkey is stirring" : "The turkey is hiding";
+      headline = stirring ? "The turkey is stirring" : p.first ? "The turkey has picked its spot" : "The turkey is hiding";
       hub = stirring ? "👀" : "💤";
       if (p.until) {
         count = fmtLeft(p.until - t);
-        label = stirring ? `until the compass wakes for ${liveText()}. Get ready.` : `until the compass is back at ${fmtClock(p.until)}`;
+        label = stirring ? `until the compass wakes for ${liveText()}. Get ready.`
+          : p.first ? `until the compass first wakes at ${fmtClock(p.until)}`
+          : `until the compass is back at ${fmtClock(p.until)}`;
       } else label = "No more compass windows today.";
       if (!sensorsOn && p.until) dir = getReady;
     } else {
@@ -693,9 +711,10 @@ body[data-asleep="1"] .hub .dot { display:none; }
     if (inApp) $("inapp").hidden = heading !== null && !!pos;
 
     // The next few compass times, so people can set a timer.
+    // Until the spot is saved there are no times to give: the clock starts then.
     const times = [];
-    if ((state === "before" || state === "dark" || state === "nospot" || (state === "live" && !p.always)) && !cfg.alwaysOn) {
-      for (let w = t < START ? START : START + Math.ceil((t - START + 1) / CYCLE) * CYCLE; w < END && times.length < 6; w += CYCLE) times.push(fmtClock(w));
+    if (hasSpot && (state === "before" || state === "dark" || (state === "live" && !p.always)) && !cfg.alwaysOn) {
+      for (let w = nextWindow(t); w < END && times.length < 6; w += CYCLE) times.push(fmtClock(w));
     }
     $("times").textContent = times.length ? `Compass wakes at ${times.join(" · ")}` : "";
   }
@@ -757,7 +776,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
   function setHow() {
     $("how").textContent = (cfg.alwaysOn
       ? "The compass stays on until the hunt ends. "
-      : `The compass wakes for ${liveText()} every ${Math.round(CYCLE / 60000)} minutes. Set a timer so you don't miss it. `) +
+      : `Once the turkey picks its hiding spot, the compass wakes for ${liveText()} every ${gapText()}. The first time is ${gapText()} after the spot is picked. The times show up on this page then, so you can set a timer. `) +
       (source === "api"
         ? "While the compass is live, your phone sends its position to the hunt's server to work out the direction. It is not stored."
         : "Your location never leaves your phone.");
@@ -795,8 +814,8 @@ body[data-asleep="1"] .hub .dot { display:none; }
     jump.addEventListener("click", () => {
       if (!(START < END)) { note.textContent = "Set the start time first."; return; }
       const t = now();
-      let next = t < START ? START : START + Math.ceil((t - START + 1) / CYCLE) * CYCLE;
-      if (next >= END) next = START;
+      let next = nextWindow(t);
+      if (next >= END) next = firstWindow();
       clockOffset = next - 15000 - Date.now();
       note.textContent = `Clock moved to 15 seconds before the ${fmtClock(next)} window.`;
       render();

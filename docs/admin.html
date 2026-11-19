@@ -158,6 +158,7 @@ a { color:var(--accent); }
     <section class="card">
       <h2>Hiding spot</h2>
       <p id="spotNow" class="msg"></p>
+      <p id="spotClock" class="small"></p>
       <button id="here" class="btn primary" type="button">Put the turkey where I'm standing</button>
       <label>Or paste coordinates from a maps app
         <input id="coords" type="text" inputmode="text" autocomplete="off" placeholder="40.73082, -73.99733">
@@ -372,7 +373,7 @@ a { color:var(--accent); }
     // Before the hunt: what still needs doing.
     const todo = [];
     if (!s.start) todo.push("Set the start time.");
-    if (!spot) todo.push("Set the hiding spot. This can wait until the day.");
+    if (!spot) todo.push("Set the hiding spot on the day, once the turkey is in place. Saving it starts the compass clock.");
     else if (spot.lat === 40.73082 && spot.lon === -73.99733) todo.push("The hiding spot is still the placeholder (Washington Square Arch).");
     if (s.end && Date.parse(s.end) > Date.now()) todo.push(`An end time is saved (${clock(s.end)}). Clear it under Mid-hunt unless the hunt should stop then.`);
     if (s.testMode && spot) todo.push("Rehearsal mode is on, so the compass answers at any time and the saved spot is NOT protected. Turn rehearsal mode off under Compass before you save the real spot.");
@@ -413,6 +414,37 @@ a { color:var(--accent); }
       $("endNow").textContent = "";
       btn.hidden = true;
     }
+    fillClock();
+  }
+
+  // When the compass wakes. The clock starts when the spot is saved: the first
+  // window opens one full gap later (never before the start), then one every gap.
+  function fillClock() {
+    const s = saved;
+    const gap = s.everyMinutes === 1 ? "1 minute" : `${s.everyMinutes} minutes`;
+    const startMs = Date.parse(s.start), endMs = s.end ? Date.parse(s.end) : Infinity, nowMs = Date.now();
+    const cycle = s.everyMinutes * 60000;
+    let text;
+    if (!s.target) {
+      text = `Saving a spot starts the compass clock. The compass first wakes ${gap} after the save (never before the start time), then every ${gap}. Save the spot once the turkey is in place.`;
+    } else if (s.alwaysOn) {
+      text = "The compass is always on, so there are no windows to wait for.";
+    } else if (isNaN(startMs)) {
+      text = "Set the start time under When. Until then the compass stays asleep.";
+    } else if (nowMs >= endMs) {
+      text = "";
+    } else {
+      const first = typeof s.spotAt === "number" ? Math.max(startMs, s.spotAt + cycle) : startMs;
+      const savedAt = typeof s.spotAt === "number" ? `Spot saved ${clock(s.spotAt)}. ` : "";
+      if (nowMs < first) {
+        text = `${savedAt}The compass first wakes ${clock(first)}, then every ${gap}.`;
+      } else {
+        const next = first + Math.ceil((nowMs - first + 1) / cycle) * cycle;
+        text = `${savedAt}Next compass window ${clock(next)}, then every ${gap}.`;
+      }
+      text += " Moving the spot keeps this clock. \"No spot yet\" resets it.";
+    }
+    $("spotClock").textContent = text;
   }
 
   function collect() {
@@ -420,6 +452,9 @@ a { color:var(--accent); }
     const rounded = spot ? { lat: +spot.lat.toFixed(6), lon: +spot.lon.toFixed(6) } : null;
     // The service keeps the spot to itself; the settings file is public, so there it is scrambled.
     s.target = !rounded ? null : mode === "api" ? rounded : scramble(rounded);
+    // The compass clock starts when a spot is saved where there was none. The service
+    // stamps that time itself; on the fallback site this page has to write it.
+    if (mode !== "api") s.spotAt = !rounded ? null : saved.target ? (saved.spotAt ?? null) : Date.now();
     s.start = fromInput($("start").value);   // the end time is left as saved; the End button changes it
     s.liveSeconds = Math.min(900, Math.max(5, Math.round(parseFloat($("liveSeconds").value) || 30)));
     s.everyMinutes = Math.min(180, Math.max(1, Math.round(parseFloat($("everyMinutes").value) || 30)));
