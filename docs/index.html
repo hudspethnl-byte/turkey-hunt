@@ -131,6 +131,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
 #times { font-weight:600; }
 
 .inapp { background:var(--card); border:2px solid var(--accent); border-radius:14px; padding:12px 14px; margin-bottom:14px; }
+.inapp.soft { border:1px solid var(--line); }
 .inapp strong { display:block; margin-bottom:4px; }
 .inapp .row { display:grid; gap:8px; margin-top:10px; }
 .inapp .btn { padding:11px 12px; font-size:16px; margin-top:0; }
@@ -707,8 +708,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
         `${looksDesktop ? "looks like a computer" : "looks like a phone"}${inApp ? `, inside ${inApp}` : ""}.`;
     }
 
-    // The "open in Safari or Chrome" prompt goes away once the compass and GPS both work here.
-    if (inApp) $("inapp").hidden = heading !== null && !!pos;
+    showInApp(state);
 
     // The next few compass times, so people can set a timer.
     // Until the spot is saved there are no times to give: the clock starts then.
@@ -740,12 +740,15 @@ body[data-asleep="1"] .hub .dot { display:none; }
     });
   }
 
-  // Shown when the page is opened inside another app's built-in browser,
-  // where phones often refuse to hand over the compass or location.
+  // Shown when the page is opened inside another app's built-in browser
+  // (a link tapped in Instagram, say). The compass often works there, so the
+  // box first asks people to try it where they are. Only if the compass or
+  // the location then fails does it tell them to open the page in Safari or
+  // Chrome, with buttons to do it. Once things work it goes away.
+  let inAppParts = null, inAppShown = null;
   function buildInApp() {
     if (!inApp) return;
     const pageUrl = location.origin + location.pathname;
-    const who = inApp === "this app" ? "this app's" : `${inApp}'s`;
     const add = (tag, text, cls) => { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; return e; };
 
     const open = add("button", "Open in my browser", "btn primary");
@@ -765,12 +768,34 @@ body[data-asleep="1"] .hub .dot { display:none; }
 
     const row = add("div", "", "row");
     row.append(open, copy);
+    inAppParts = { title: add("strong", ""), text: add("p", ""), row };
+    $("inapp").append(inAppParts.title, inAppParts.text, row);
+  }
+
+  function showInApp(state) {
+    if (!inAppParts) return;
     const box = $("inapp");
-    box.append(
-      add("strong", "Open this page in Safari or Chrome"),
-      add("p", `You're in ${who} built-in browser, where the compass often can't start. Tap the ⋯ menu at the top of the screen and choose "Open in external browser", or use the buttons below.`),
-      row);
-    box.hidden = false;
+    const where = inApp === "this app" ? "this app's built-in browser" : `${inApp}'s built-in browser`;
+    const noLocation = geoError === "denied" || geoError === "unsupported";
+    const noCompass = heading === null && (compassDenied || Date.now() - sensorsSince > 3000);
+    const running = state !== "over" && state !== "unset";
+    // "fail": tried here and it didn't work. "try": not tried yet. "": working, or nothing to try.
+    const stage = !running ? "" : sensorsOn ? (noCompass || noLocation ? "fail" : "") : "try";
+    const key = stage + "|" + (stage === "try" ? $("enable").textContent : noCompass ? "compass" : "location");
+    if (key === inAppShown) return;
+    inAppShown = key;
+    box.hidden = !stage;
+    if (!stage) return;
+    box.classList.toggle("soft", stage === "try");
+    inAppParts.row.hidden = stage === "try";
+    if (stage === "try") {
+      inAppParts.title.textContent = "Try the compass here first";
+      inAppParts.text.textContent = `You're in ${where}. Tap "${$("enable").textContent}" below to try it here. If the compass doesn't start, this box will show you how to open the page in Safari or Chrome.`;
+    } else {
+      inAppParts.title.textContent = "Open this page in Safari or Chrome";
+      inAppParts.text.textContent = (noCompass ? `The compass didn't start in ${where}. ` : `Your location isn't coming through in ${where}. `) +
+        `Tap the ⋯ menu at the top of the screen and choose "Open in external browser", or use the buttons below.`;
+    }
   }
 
   function setHow() {
