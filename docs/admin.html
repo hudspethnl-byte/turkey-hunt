@@ -87,6 +87,15 @@ textarea {
 .posted .text { white-space:pre-wrap; overflow-wrap:anywhere; }
 .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 input[type="checkbox"] { width:22px; height:22px; flex:none; }
+.places { display:grid; gap:8px; }
+.places:empty { display:none; }
+.place {
+  display:block; width:100%; text-align:left; padding:11px 12px; border-radius:12px; border:1px solid var(--muted);
+  background:transparent; color:inherit; font:inherit; cursor:pointer;
+}
+.place b { display:block; overflow-wrap:anywhere; }
+.place span { display:block; font-size:14px; color:var(--muted); overflow-wrap:anywhere; }
+.place.on { border:2px solid var(--accent); padding:10px 11px; }
 .msg { font-weight:600; }
 .msg.ok { color:var(--ok); }
 .msg.bad { color:var(--bad); }
@@ -160,6 +169,13 @@ a { color:var(--accent); }
       <p id="spotNow" class="msg"></p>
       <p id="spotClock" class="small"></p>
       <button id="here" class="btn primary" type="button">Put the turkey where I'm standing</button>
+      <label>Or find it by name or address
+        <input id="placeQuery" type="text" inputmode="text" enterkeyhint="search" autocomplete="off" autocapitalize="words" placeholder="A bar's name, or a street address">
+      </label>
+      <button id="placeFind" class="btn" type="button">Search</button>
+      <p id="placeMsg" class="msg"></p>
+      <div id="placeList" class="places"></div>
+      <p class="small">The search covers the New York area and uses a public map lookup, so what you type is sent to that service. A new place can be missing: try its street address, or paste coordinates.</p>
       <label>Or paste coordinates from a maps app
         <input id="coords" type="text" inputmode="text" autocomplete="off" placeholder="40.73082, -73.99733">
       </label>
@@ -225,6 +241,7 @@ a { color:var(--accent); }
   let saved = null;   // the settings as the server has them
   let sha = null;     // GitHub's version tag for the settings file
   let spot = null;    // { lat, lon } being edited, or null for "no spot yet"
+  let places = [];    // the matches from the last search by name or address
 
   /* ---------- the spot is stored scrambled, so it can't be read at a glance ---------- */
   function scramble(obj) {
@@ -358,6 +375,7 @@ a { color:var(--accent); }
     spot = readSpot(s.target);
     showSpot();
     $("coords").value = "";
+    $("placeQuery").value = ""; $("placeMsg").textContent = ""; $("placeList").textContent = ""; places = [];
     $("start").value = s.start ? toInput(s.start) : "";
     $("liveSeconds").value = s.liveSeconds;
     $("everyMinutes").value = s.everyMinutes;
@@ -509,7 +527,100 @@ a { color:var(--accent); }
     const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
     if (Math.abs(lat) > 90 || Math.abs(lon) > 180) { say("spotNow", "Those don't look like coordinates.", "bad"); return; }
     spot = { lat, lon };
+    unpickPlace();
     showSpot(`Spot read as ${lat.toFixed(5)}, ${lon.toFixed(5)}. Check the map, then save.`);
+  }
+
+  /* ---------- find the spot by name or address ---------- */
+  // Two free public lookups built on OpenStreetMap's map data. This page asks
+  // them straight from the organizer's phone: the first, then the second if
+  // the first finds nothing or doesn't answer. Results are kept to the New
+  // York area. Picking a match only fills in the spot; nothing is sent to
+  // phones until Save.
+  const AREA = { west: -74.30, south: 40.45, east: -73.65, north: 40.95 };
+  const joinParts = parts => parts.filter(Boolean).filter((part, i, all) => all.indexOf(part) === i).join(", ");
+  async function getJson(url) {
+    const stop = new AbortController(), timer = setTimeout(() => stop.abort(), 8000);
+    try {
+      const res = await fetch(url, { signal: stop.signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } finally { clearTimeout(timer); }
+  }
+  async function lookupFirst(q) {
+    const u = new URL("https://nominatim.openstreetmap.org/search");
+    u.search = new URLSearchParams({ q, format: "jsonv2", limit: "5", addressdetails: "1", bounded: "1",
+      viewbox: `${AREA.west},${AREA.north},${AREA.east},${AREA.south}` });
+    return (await getJson(u)).map(x => {
+      const a = x.address || {}, street = [a.house_number, a.road].filter(Boolean).join(" ");
+      return { name: x.name || street || String(x.display_name || "").split(",")[0], kind: x.type, street,
+        // In New York the borough comes back as "suburb", and "neighbourhood" is sometimes a community board.
+        area: joinParts([[a.quarter, a.neighbourhood].find(v => v && !/community board/i.test(v)),
+          a.suburb || a.borough || a.city || a.town || a.village]),
+        lat: parseFloat(x.lat), lon: parseFloat(x.lon) };
+    });
+  }
+  async function lookupSecond(q) {
+    const u = new URL("https://photon.komoot.io/api/");
+    u.search = new URLSearchParams({ q, limit: "5", lat: "40.73", lon: "-73.99",
+      bbox: `${AREA.west},${AREA.south},${AREA.east},${AREA.north}` });
+    return ((await getJson(u)).features || []).map(f => {
+      const p = f.properties || {}, c = (f.geometry && f.geometry.coordinates) || [];
+      const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+      return { name: p.name || street, kind: p.osm_value, street, area: joinParts([p.district, p.city]), lat: Number(c[1]), lon: Number(c[0]) };
+    });
+  }
+  // Keep real matches inside the area, drop repeats, and write one line of detail for each.
+  function tidyPlaces(list) {
+    const seen = new Set(), out = [];
+    for (const p of list) {
+      if (!p.name || !isFinite(p.lat) || !isFinite(p.lon)) continue;
+      if (p.lat < AREA.south || p.lat > AREA.north || p.lon < AREA.west || p.lon > AREA.east) continue;
+      const id = `${p.name}|${p.lat.toFixed(4)}|${p.lon.toFixed(4)}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const kind = p.kind && !/^(yes|house|residential|building|apartments)$/.test(p.kind) ? String(p.kind).replace(/_/g, " ") : "";
+      const where = joinParts([p.street === p.name ? "" : p.street, p.area]);
+      out.push({ name: p.name, detail: [kind, where].filter(Boolean).join(" · "), lat: p.lat, lon: p.lon });
+      if (out.length === 5) break;
+    }
+    return out;
+  }
+  function unpickPlace() { [...$("placeList").children].forEach(el => el.classList.remove("on")); }
+  function pickPlace(i) {
+    const p = places[i];
+    spot = { lat: p.lat, lon: p.lon };
+    $("coords").value = "";
+    [...$("placeList").children].forEach((el, n) => el.classList.toggle("on", n === i));
+    showSpot(`Spot read as ${p.name} (${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}). Check the map, then save.`);
+  }
+  async function findPlace() {
+    const q = $("placeQuery").value.trim();
+    $("placeList").textContent = ""; places = [];
+    if (q.length < 3) { say("placeMsg", "Type a name or an address first.", "bad"); return; }
+    say("placeMsg", "Searching…");
+    $("placeFind").disabled = true;
+    let found = [], reached = false;
+    for (const look of [lookupFirst, lookupSecond]) {
+      try { found = tidyPlaces(await look(q)); reached = true; } catch (e) { continue; }
+      if (found.length) break;
+    }
+    $("placeFind").disabled = false;
+    if (!found.length) {
+      say("placeMsg", reached ? "No match in the New York area. Try the street address, or paste coordinates below."
+        : "Couldn't reach the map lookup. Check your signal, or paste coordinates below.", "bad");
+      return;
+    }
+    places = found;
+    say("placeMsg", found.length === 1 ? "One match. Tap it to use it." : `${found.length} matches. Tap the right one.`);
+    found.forEach((p, i) => {
+      const b = document.createElement("button"), name = document.createElement("b"), detail = document.createElement("span");
+      b.type = "button"; b.className = "place";
+      name.textContent = p.name; detail.textContent = p.detail;
+      b.append(name, detail);
+      b.addEventListener("click", () => pickPlace(i));
+      $("placeList").appendChild(b);
+    });
   }
 
   /* ---------- hints (main site only) ---------- */
@@ -667,7 +778,9 @@ a { color:var(--accent); }
   $("hintPost").addEventListener("click", postHint);
   $("here").addEventListener("click", locate);
   $("coords").addEventListener("input", pasted);
-  $("noSpot").addEventListener("click", () => { spot = null; showSpot("No spot yet. Save to send that to phones."); });
+  $("placeFind").addEventListener("click", findPlace);
+  $("placeQuery").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); findPlace(); } });
+  $("noSpot").addEventListener("click", () => { spot = null; unpickPlace(); showSpot("No spot yet. Save to send that to phones."); });
   $("save").addEventListener("click", () => send(collect(), "Update hunt settings"));
   $("endgame").addEventListener("click", () => {
     if ($("endgame").classList.contains("on")) { say("saveMsg", "Endgame is already on."); return; }
