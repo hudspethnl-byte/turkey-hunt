@@ -190,7 +190,7 @@ body[data-asleep="1"] .hub .dot { display:none; }
 
   <section id="ig" class="card ig" aria-label="Instagram" hidden>
     <h2 id="igTitle">Hints and updates</h2>
-    <p id="igNote">Hints are posted on Instagram.</p>
+    <p id="igNote">Hints show up on this page and on Instagram.</p>
     <iframe id="igFrame" title="The hunt's Instagram profile" loading="lazy" referrerpolicy="no-referrer"
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
     <a id="igLink" class="btn" target="_blank" rel="noopener"></a>
@@ -278,7 +278,10 @@ body[data-asleep="1"] .hub .dot { display:none; }
     const hints = Array.isArray(raw.hints) ? raw.hints : [];
     showHints(hints);
     $("igTitle").textContent = hints.length ? "Instagram" : "Hints and updates";
-    $("igNote").textContent = hints.length ? "Stories and updates from the hunt." : "Hints are posted on Instagram.";
+    // Hints go up in both places on the main site, whose settings always carry a
+    // hints list. The fallback site has no hints of its own.
+    $("igNote").textContent = hints.length ? "Hints are posted above and on Instagram."
+      : Array.isArray(raw.hints) ? "Hints show up on this page and on Instagram." : "Hints are posted on Instagram.";
   }
 
   /* ---------- hints ---------- */
